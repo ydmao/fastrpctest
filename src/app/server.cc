@@ -19,11 +19,11 @@ void handle_term(int) {
 struct server {
     server(int port) : rpcs_(port, this) {
     }
-    void nop(rpc::grequest<ProcNumber::nop>* q, rpc::async_rpcc*, uint64_t) {
-        q->execute(OK);
+    void nb_nop(rpc::grequest<ProcNumber::nop>& q, rpc::async_rpcc*, uint64_t) {
+        q.execute(OK);
     }
   private:
-    rpc::async_rpc_server<server> rpcs_;
+    rpc::async_rpc_server<server, 0, true> rpcs_;
 };
 
 } // namespace pcloud
