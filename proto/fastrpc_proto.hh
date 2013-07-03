@@ -13,6 +13,7 @@ struct app_param {
 
 #define RPC_FOR_EACH_CLIENT_MESSAGE(M, ...)			\
     M(0, nop, NopRequest, NopReply, ## __VA_ARGS__) \
+    M(0, echo, EchoRequest, EchoReply, ## __VA_ARGS__)
     
 #define RPC_FOR_EACH_INTERCONNECT_MESSAGE(M, ...)
 };

@@ -15,7 +15,14 @@ struct rpcc : public rpc::async_batched_rpcc {
     }
     template <typename F>
     void nop(F callback) {
-        rpc::gcrequest<ProcNumber::nop, F>* g = new rpc::gcrequest<ProcNumber::nop, F>(callback);
+        auto g = new rpc::gcrequest<ProcNumber::nop, F>(callback);
+        cl_->call(g);
+        winctrl();
+    }
+    template <typename F>
+    void echo(const std::string& v, F callback) {
+        auto g = new rpc::gcrequest<ProcNumber::echo, F>(callback);
+        g->req_.set_message(v);
         cl_->call(g);
         winctrl();
     }

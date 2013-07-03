@@ -22,6 +22,10 @@ struct server {
     void nb_nop(rpc::grequest<ProcNumber::nop>& q, rpc::async_rpcc*, uint64_t) {
         q.execute(OK);
     }
+    void nb_echo(rpc::grequest<ProcNumber::echo>& q, rpc::async_rpcc*, uint64_t) {
+        q.reply_.set_message(q.req_.message());
+        q.execute(OK);
+    }
   private:
     rpc::async_rpc_server<server, 0, true> rpcs_;
 };

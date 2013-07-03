@@ -8,6 +8,7 @@ enum ErrorCode {
 
 enum ProcNumber {
     nop = 1;
+    echo = 2;
 
     nproc = 100;
 }
@@ -17,4 +18,13 @@ message NopRequest {
 
 message NopReply {
     required ErrorCode eno = 1;
+}
+
+message EchoRequest {
+    required bytes message = 1;
+}
+
+message EchoReply {
+    required ErrorCode eno = 1;
+    required bytes message = 2;
 }
