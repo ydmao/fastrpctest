@@ -1,0 +1,20 @@
+package bench;
+
+enum ErrorCode {
+    UNKNOWN = -1;
+    OK = 0;
+    ERR = 1;
+}
+
+enum ProcNumber {
+    nop = 1;
+
+    nproc = 100;
+}
+
+message NopRequest {
+}
+
+message NopReply {
+    required ErrorCode eno = 1;
+}
