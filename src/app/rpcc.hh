@@ -1,9 +1,8 @@
 #ifndef BENCH_RPCC_HH
 #define BENCH_RPCC_HH
 
-#include "rpc/request_analyzer.hh"
 #include "rpc/async_rpcc_helper.hh"
-#include "bench.pb.h"
+#include "proto/fastrpc_proto.hh"
 
 namespace bench {
 

@@ -1,4 +1,5 @@
-#include "bench.pb.h"
+#include "proto/fastrpc_proto.hh"
+#include "proto/fastrpc_proto_server.hh"
 #include "rpc_common/compiler.hh"
 #include "rpc/rpc_server.hh"
 #include "rpcc.hh"
@@ -16,18 +17,23 @@ void handle_term(int) {
     terminated_ = true;
 }
 
-struct server {
-    server(int port) : rpcs_(port, this) {
+struct server : public TestServiceInterface<true> {
+    server() {
     }
-    void nb_nop(rpc::grequest<ProcNumber::nop>& q, rpc::async_rpcc*, uint64_t) {
+    void nop(rpc::grequest<ProcNumber::nop, false>* q, uint64_t) {
+        q->execute(OK);
+    }
+    void echo(rpc::grequest<ProcNumber::echo, false>* q, uint64_t) {
+        q->reply_.set_message(q->req_.message());
+        q->execute(OK);
+    }
+    void nop(rpc::grequest<ProcNumber::nop, true>& q, uint64_t) {
         q.execute(OK);
     }
-    void nb_echo(rpc::grequest<ProcNumber::echo>& q, rpc::async_rpcc*, uint64_t) {
+    void echo(rpc::grequest<ProcNumber::echo, true>& q, uint64_t) {
         q.reply_.set_message(q.req_.message());
         q.execute(OK);
     }
-  private:
-    rpc::async_rpc_server<server, 0, true> rpcs_;
 };
 
 } // namespace pcloud
@@ -49,7 +55,9 @@ int main(int argc, char* argv[]) {
 
     GOOGLE_PROTOBUF_VERIFY_VERSION;
     mandatory_assert(signal(SIGTERM, bench::handle_term) == 0);
-    bench::server s(port);
+    rpc::async_rpc_server rpcs(port);
+    bench::server s;
+    rpcs.register_service(&s);
     std::cout << argv[0] << " listening at port " << port << "\n";
     auto loop = rpc::nn_loop::get_tls_loop();
     loop->enter();

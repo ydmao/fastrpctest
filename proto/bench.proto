@@ -6,13 +6,6 @@ enum ErrorCode {
     ERR = 1;
 }
 
-enum ProcNumber {
-    nop = 1;
-    echo = 2;
-
-    nproc = 100;
-}
-
 message NopRequest {
 }
 
@@ -27,4 +20,9 @@ message EchoRequest {
 message EchoReply {
     required ErrorCode eno = 1;
     required bytes message = 2;
+}
+
+service TestService {
+    rpc nop(NopRequest) returns (NopReply);
+    rpc echo(EchoRequest) returns (EchoReply);
 }
