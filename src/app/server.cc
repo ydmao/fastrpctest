@@ -52,8 +52,6 @@ int main(int argc, char* argv[]) {
         cerr << "Unknown option " << e.get_option_name() << ".\n" << desc << "\n";
         return -1;
     }
-
-    GOOGLE_PROTOBUF_VERIFY_VERSION;
     mandatory_assert(signal(SIGTERM, bench::handle_term) == 0);
     rpc::async_rpc_server rpcs(port);
     bench::server s;
