@@ -7,10 +7,13 @@ CXXFLAGS = -fPIC -Wno-pmf-conversions -g -std=gnu++0x -I./src \
 
 LIBS = -lboost_program_options-mt -lev -lprotobuf -ldl -liberty -ltcmalloc
 
-all: $(OBJDIR)/server \
+FASTRPC = ./fastrpc/obj/libfastrpc.so
+
+# Make sure that FASTRPC is the first target!
+all: $(FASTRPC) \
+     $(OBJDIR)/server \
      $(OBJDIR)/client
 
-FASTRPC = ./fastrpc/obj/libfastrpc.so
 $(FASTRPC): fastrpc-update
 
 fastrpc-update:
