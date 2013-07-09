@@ -55,7 +55,10 @@ void test_echo() {
 }
 
 int main(int argc, char* argv[]) {
-    pin(ncore() - 1);
+    int index = 0;
+    if (argc > 1)
+        index = atoi(argv[1]);
+    pin(ncore() - index - 1);
     signal(SIGALRM, handle_alarm);
     test_echo();
     return 0;
