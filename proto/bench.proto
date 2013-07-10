@@ -1,6 +1,7 @@
 package bench;
 
 enum ErrorCode {
+    RPCERR = -2;
     UNKNOWN = -1;
     OK = 0;
     ERR = 1;

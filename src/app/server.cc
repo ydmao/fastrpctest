@@ -49,7 +49,7 @@ int main(int argc, char* argv[]) {
         bpo::store(bpo::parse_command_line(argc, argv, desc), vm);
         bpo::notify(vm);
     } catch (bpo::unknown_option &e) {
-        cerr << "Unknown option " << e.get_option_name() << ".\n" << desc << "\n";
+        std::cerr << "Unknown option " << e.get_option_name() << ".\n" << desc << "\n";
         return -1;
     }
     mandatory_assert(signal(SIGTERM, bench::handle_term) == 0);
