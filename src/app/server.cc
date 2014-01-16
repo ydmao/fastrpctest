@@ -20,6 +20,7 @@ void handle_term(int) {
 struct server : public TestServiceInterface<true> {
     server() {
     }
+#if 0
     void nop(rpc::grequest<ProcNumber::nop, false>* q, uint64_t) {
         q->execute(OK);
     }
@@ -27,6 +28,7 @@ struct server : public TestServiceInterface<true> {
         q->reply_.set_message(q->req_.message());
         q->execute(OK);
     }
+#endif
     void nop(rpc::grequest<ProcNumber::nop, true>& q, uint64_t) {
         q.execute(OK);
     }
