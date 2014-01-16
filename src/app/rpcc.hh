@@ -8,7 +8,7 @@ namespace bench {
 
 struct rpcc : public rpc::async_batched_rpcc {
     rpcc(const char *host, int port, int w)
-        : rpc::async_batched_rpcc(new rpc::async_rpcc(host, port, NULL, NULL), w) {
+        : rpc::async_batched_rpcc(new rpc::async_rpcc(host, port, NULL, NULL, 0), w) {
     }
     rpcc(rpc::async_rpcc* cl, int w) : rpc::async_batched_rpcc(cl, w) {
     }

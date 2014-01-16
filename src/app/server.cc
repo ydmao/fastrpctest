@@ -34,6 +34,9 @@ struct server : public TestServiceInterface<true> {
         q.reply_.set_message(q.req_.message());
         q.execute(OK);
     }
+    void client_failure(rpc::async_rpcc*) {
+        // usually nop
+    }
 };
 
 } // namespace pcloud
@@ -53,7 +56,7 @@ int main(int argc, char* argv[]) {
         return -1;
     }
     mandatory_assert(signal(SIGTERM, bench::handle_term) == 0);
-    rpc::async_rpc_server rpcs(port);
+    rpc::async_rpc_server rpcs(port, "0.0.0.0");
     bench::server s;
     rpcs.register_service(&s);
     std::cout << argv[0] << " listening at port " << port << "\n";
