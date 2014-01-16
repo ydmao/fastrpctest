@@ -1,5 +1,7 @@
 #include "rpcc.hh"
 #include "common/cpu.hh"
+#include "proto/fastrpc_proto_client.hh"
+#include "rpc/sync_tcpconn.hh"
 
 using namespace bench;
 using namespace rpc;
@@ -50,8 +52,22 @@ void test_echo() {
         c.echo("hellow world", check_echo());
         ++n_;
     }
-    std::cout << (n_ / duration) << " echo/second\n";
+    std::cout << "test_echo: "<< (n_ / duration) << " echo/second\n";
     c.drain();
+}
+
+void test_sync_client() {
+    bench::TestServiceClient<rpc::sync_tcpconn> client;
+    // connect to localhost:8950, using localhost and any port
+    client.init("localhost", 8950, "localhost", 0);
+    bench::EchoRequest req;
+    req.set_message("hello world");
+    assert(client.send_echo(req));
+
+    bench::EchoReply reply;
+    assert(client.recv_echo(reply));
+    assert(reply.message() == req.message());
+    printf("test_sync_client: OK\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -61,5 +77,7 @@ int main(int argc, char* argv[]) {
     pin(ncore() - index - 1);
     signal(SIGALRM, handle_alarm);
     test_echo();
+
+    test_sync_client();
     return 0;
 }
