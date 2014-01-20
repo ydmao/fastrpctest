@@ -5,14 +5,16 @@ SRCDIR = ./src
 CXXFLAGS = -fPIC -Wno-pmf-conversions -g -std=gnu++0x -I./src \
            -I. -fno-omit-frame-pointer -O2 -I./fastrpc/src
 
-LIBS = -lboost_program_options-mt -lev -lprotobuf -ldl -liberty -ltcmalloc
+LIBS = -lboost_program_options -lev -lprotobuf -ldl
 
 FASTRPC = ./fastrpc/obj/libfastrpc.so
 
 # Make sure that FASTRPC is the first target!
 all: $(FASTRPC) \
      $(OBJDIR)/server \
-     $(OBJDIR)/client
+     $(OBJDIR)/client \
+     $(OBJDIR)/ibclient \
+     $(OBJDIR)/ibserver
 
 $(FASTRPC): fastrpc-update
 
@@ -29,6 +31,12 @@ $(OBJDIR)/server: $(OBJDIR)/server.o $(COMMON_OBJS) $(FASTRPC)
 
 $(OBJDIR)/client: $(OBJDIR)/client.o $(COMMON_OBJS) $(FASTRPC)
 	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) $(LIBS) -o $@
+
+$(OBJDIR)/ibclient: $(OBJDIR)/ibclient.o $(FASTRPC)
+	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) -libverbs -lev -o $@
+
+$(OBJDIR)/ibserver: $(OBJDIR)/ibserver.o $(FASTRPC)
+	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) -libverbs -lev -o $@
 
 $(OBJDIR)/%.o: $(SRCDIR)/common/%.cc
 	mkdir -p $(DEPS) $(OBJDIR)
