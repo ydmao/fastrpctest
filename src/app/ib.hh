@@ -143,6 +143,7 @@ struct infb_conn {
 			    IBV_QP_ACCESS_FLAGS) == 0);
 
 	CHECK(post_recv(rx_depth) == rx_depth);
+	rreq_ = rx_depth;
 
 	if (use_event) {
             // when a completion queue entry (CQE) is placed on the CQ,
@@ -180,7 +181,10 @@ struct infb_conn {
 
 	// XXX: Post all empty read requests
 	assert(pending_read_ == 0);
-	post_recv(1);
+	if (rreq_ == 0) {
+  	    post_recv(rx_depth_);
+	    rreq_ = rx_depth_;
+	}
 	return r;
     }
 
@@ -219,6 +223,7 @@ struct infb_conn {
 	    CHECK(wc[i].status == IBV_WC_SUCCESS);
 	    if (wc[i].wr_id == receive_work_request_id) {
 		pending_read_ += size_;
+		--rreq_;
 		//fprintf(stderr, "receive_work_done: %zd\n", pending_read_);
 	    } else if (wc[i].wr_id == send_work_request_id) {
 		write_room_ += size_;
@@ -367,6 +372,7 @@ struct infb_conn {
 
     infb_ev_watcher* w_;
 
+    int rreq_; // number of outstanding read request
     size_t pending_read_; // number of bytes pending
     size_t write_room_;   // number of bytes avaiable in the write buffer
 };
