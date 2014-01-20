@@ -1,15 +1,15 @@
 #include "ib.hh"
 #include "rpc_common/sock_helper.hh"
 
-static char b[4096];
-size_t size = 4096;
+const size_t size = 4096;
+static char b[size];
 
 static void process_infb_event(infb_ev_watcher* w, int flags, infb_conn* c) {
     static double t0;
     if (flags & INFB_EV_READ) {
         static int iters = 0;
 	assert(c->read(b, sizeof(b)) == sizeof(b));
-	char eb[4096];
+	char eb[size];
 	sprintf(eb, "s_%d", iters);
 	//fprintf(stderr, "expected %s, actual %s\n", eb, b);
 	assert(strcmp(eb, b) == 0);
