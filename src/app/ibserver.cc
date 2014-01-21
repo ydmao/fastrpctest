@@ -12,8 +12,6 @@ static void process_infb_event(infb_ev_watcher* w, int flags, infb_conn* c) {
 	char eb[size];
 	sprintf(eb, "c_%d", iters);
 	assert(strcmp(eb, b) == 0);
-	if (iters == 0)
-	    t0 = now();
 	++iters;
 	w->start(INFB_EV_WRITE);
     } else if (flags & INFB_EV_WRITE) {

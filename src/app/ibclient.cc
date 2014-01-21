@@ -1,5 +1,6 @@
 #include "ib.hh"
 #include "rpc_common/sock_helper.hh"
+#include "rpc_common/util.hh"
 
 static char b[4096];
 size_t size = 4096;
@@ -14,10 +15,10 @@ static void process_infb_event(infb_ev_watcher* w, int flags, infb_conn* c) {
 	//fprintf(stderr, "expected %s, actual %s\n", eb, b);
 	assert(strcmp(eb, b) == 0);
 	if (iters == 0)
-	    t0 = now();
+	    t0 = rpc::common::now();
 	++iters;
 	if (iters == 200000) {
-	    double t = now() - t0;
+	    double t = rpc::common::now() - t0;
 	    fprintf(stderr, "completed %d iterations in %.2f seconds, latency %.1f us\n",
 		    iters, t, t * 1000000 / iters);
 	    exit(0);

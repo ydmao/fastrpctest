@@ -15,12 +15,6 @@
                      fprintf(stderr, "CHECK(%s) failed %s:%d\n", \
                              #x, __FILE__, __LINE__); perror("check:"); exit(1); } }
 
-inline double now() {
-    struct timeval tv;
-    gettimeofday(&tv, 0);
-    return tv.tv_sec + tv.tv_usec / 1000000.0;
-}
-
 struct infb_conn;
 
 enum { INFB_EV_READ = 0x1, INFB_EV_WRITE = 0x2 };
