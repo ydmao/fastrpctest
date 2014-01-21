@@ -1,13 +1,15 @@
 #include "ib.hh"
 #include "rpc_common/sock_helper.hh"
 
+static const size_t size = 4096;
+static char b[size];
+
 static void process_infb_event(infb_ev_watcher* w, int flags, infb_conn* c) {
-    char b[4096];
     static double t0;
     if (flags & INFB_EV_READ) {
         static int iters = 0;
 	c->read(b, sizeof(b));
-	char eb[4096];
+	char eb[size];
 	sprintf(eb, "c_%d", iters);
 	assert(strcmp(eb, b) == 0);
 	if (iters == 0)
@@ -26,7 +28,6 @@ int main(int, char*[]) {
     infb_conn conn;
     // the first infiniband port is 1
     int ib_port = 1;
-    size_t size = 4096;
     int rx_depth = 1000;
     bool use_event = false;
     int sl = 0;
