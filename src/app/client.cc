@@ -2,6 +2,7 @@
 #include "common/cpu.hh"
 #include "proto/fastrpc_proto_client.hh"
 #include "rpc/sync_tcpconn.hh"
+#include "rpc_common/util.hh"
 
 using namespace bench;
 using namespace rpc;
@@ -70,14 +71,35 @@ void test_sync_client() {
     printf("test_sync_client: OK\n");
 }
 
+void test_ipoib_rtt() {
+    bench::TestServiceClient<rpc::sync_tcpconn> client;
+    // connect to localhost:8950, using localhost and any port
+    client.init("192.168.100.10", 8950, "0.0.0.0", 0);
+    bench::EchoRequest req;
+    bench::EchoReply reply;
+    req.set_message("hello world");
+    int n = 0;
+    double t0 = rpc::common::now();
+    for (; rpc::common::now() - t0 < 5; ++n) {
+        assert(client.send_echo(req));
+	reply.Clear();
+        assert(client.recv_echo(reply));
+        assert(reply.message() == req.message());
+    }
+    printf("test_ipoib_rtt: %.1f us/rtt\n", (rpc::common::now() - t0) * 1000000 / n);
+}
+
 int main(int argc, char* argv[]) {
     int index = 0;
     if (argc > 1)
         index = atoi(argv[1]);
     pin(ncore() - index - 1);
     signal(SIGALRM, handle_alarm);
+#if 1
     test_echo();
-
     test_sync_client();
+#else
+    test_ipoib_rtt();
+#endif
     return 0;
 }
