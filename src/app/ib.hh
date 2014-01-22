@@ -10,12 +10,25 @@
 #include <errno.h>
 #include <algorithm>
 #include <sys/time.h>
+#include <queue>
+
+#include "compiler/str.hh"
 
 #define CHECK(x) { if(!(x)){ \
                      fprintf(stderr, "CHECK(%s) failed %s:%d\n", \
                              #x, __FILE__, __LINE__); perror("check:"); exit(1); } }
 
 struct infb_conn;
+
+template <typename A, typename B>
+inline A round_down(A a, B b) {
+    return a / b * b;
+}
+
+template <typename A, typename B>
+inline A round_up(A a, B b) {
+    return (a % b) ? (a / b * b + b) : a;
+}
 
 enum { INFB_EV_READ = 0x1, INFB_EV_WRITE = 0x2 };
 
@@ -74,16 +87,18 @@ struct infb_sockaddr {
 };
 
 struct infb_conn {
-    infb_conn() 
-	: dev_(NULL), context_(NULL), channel_(NULL), 
-	  buffer_(NULL), w_(NULL), 
-	  pending_read_(0), write_room_(0) {
+    infb_conn() : dev_(NULL), context_(NULL), channel_(NULL), w_(NULL) {
     }
-    int create(const char* dname, int ib_port, size_t size, 
-	       int rx_depth, bool use_event, int sl, ibv_mtu mtu) {
+    
+    int create(const char* dname, int ib_port,
+	       int rx_depth, int tx_depth,
+	       bool use_event, int sl, ibv_mtu mtu) {
 	ib_port_ = ib_port;
 	sl_ = sl;
 	mtu_ = mtu;
+	mtub_ = 128 << mtu;
+        tx_depth_ = tx_depth;
+	rx_depth_ = rx_depth;
         ibv_device** dl = ibv_get_device_list(NULL);
 	CHECK(dl);
         for (int i = 0; dl[i]; ++i)
@@ -100,23 +115,20 @@ struct infb_conn {
 
 	// create and register memory region of size_ bytes
 	const int page_size = sysconf(_SC_PAGESIZE);
-        CHECK(size % page_size == 0);
-	size_ = size;
-	CHECK(buffer_ = (char*)memalign(page_size, size));
-	//memset(buffer_, 0, size);
-	memset(buffer_, 0x7b, size);
-	CHECK(mr_ = ibv_reg_mr(pd_, buffer_, size, IBV_ACCESS_LOCAL_WRITE));
+	buf_.len_ = round_up(mtub_ * (rx_depth_ + tx_depth_), page_size);
+	CHECK(buf_.s_ = (char*)memalign(page_size, buf_.len_));
+	bzero(buf_.s_, buf_.len_);
+	CHECK(mr_ = ibv_reg_mr(pd_, buf_.s_, buf_.len_, IBV_ACCESS_LOCAL_WRITE));
 
 	// create an completion queue with depth of rx_depth
-	rx_depth_ = rx_depth;
-	CHECK(cq_ = ibv_create_cq(context_, rx_depth + 1, NULL, channel_, 0));
+	CHECK(cq_ = ibv_create_cq(context_, rx_depth + tx_depth, NULL, channel_, 0));
 
 	// create a RC queue pair
 	ibv_qp_init_attr attr;
 	bzero(&attr, sizeof(attr));
 	attr.send_cq = cq_;
 	attr.recv_cq = cq_;
-	attr.cap.max_send_wr = 1;
+	attr.cap.max_send_wr = tx_depth;
 	attr.cap.max_recv_wr = rx_depth;
 	attr.cap.max_send_sge = 1;
 	attr.cap.max_recv_sge = 1;
@@ -135,9 +147,8 @@ struct infb_conn {
 			    IBV_QP_PKEY_INDEX   |
 			    IBV_QP_PORT  	| 
 			    IBV_QP_ACCESS_FLAGS) == 0);
-
-	CHECK(post_recv(rx_depth) == rx_depth);
-	rreq_ = rx_depth;
+	for (int i = 0; i < rx_depth; ++i)
+	    CHECK(post_recv_with_id(buf_.s_ + mtub_ * i, mtub_) == 0);
 
 	if (use_event) {
             // when a completion queue entry (CQE) is placed on the CQ,
@@ -153,9 +164,7 @@ struct infb_conn {
 	CHECK(portattr_.link_layer == IBV_LINK_LAYER_ETHERNET || portattr_.lid);
 	// XXX: support user specified gid_index
 	local_.make(portattr_.lid, qp_->qp_num, 0, NULL);
-	// XXX: how much?
-	write_room_ = size_;
-	pending_read_ = 0;
+	wbuf_.assign(wbuf_start(), tx_depth_ * mtub_);
 	return 0;
     }
 
@@ -164,37 +173,40 @@ struct infb_conn {
     }
 
     ssize_t read(char* buf, size_t len) {
-	//fprintf(stderr, "read one: pending_read %zd, %zd\n", pending_read_, len);
-	if (pending_read_ == 0) {
+	if (pending_read_.empty()) {
 	    errno = EWOULDBLOCK;
 	    return -1;
 	}
-	size_t r = std::min(len, pending_read_);
-	memcpy(buf, buffer_, r);
-	pending_read_ -= r;
-
-	// XXX: Post all empty read requests
-	assert(pending_read_ == 0);
-	if (rreq_ == 0) {
-  	    post_recv(rx_depth_);
-	    rreq_ = rx_depth_;
+	assert(len > 0);
+	size_t r = 0;
+	while (r < len && !pending_read_.empty()) {
+	    refcomp::str& rx = pending_read_.front();
+	    size_t n = std::min(len - r, rx.length());
+	    memcpy(buf + r, rx.data(), n);
+	    r += n;
+	    if (n == rx.length()) {
+		pending_read_.pop();
+		post_recv_with_id((char*)round_down(uintptr_t(rx.s_), mtub_), mtub_);
+	    } else
+		rx.assign(rx.data() + n, rx.length() - n);
 	}
 	return r;
     }
 
     ssize_t write(const char* buf, size_t len) {
-	//fprintf(stderr, "write one: write_room %zd\n", write_room_);
-	if (write_room_ == 0) {
+	if (wbuf_.length() == 0) {
 	    errno = EWOULDBLOCK;
 	    return -1;
 	}
-	size_t r = std::min(len, write_room_);
-	memcpy(buffer_, buf, r);
-	write_room_ -= len;
-
-	// XXX: write as many as buffer, and post_send all of them
-	assert(write_room_ == 0);
-	post_send(1);
+	assert(wbuf_.length() % mtub_ == 0);
+	ssize_t r = 0;
+	while (r < len && wbuf_.length()) {
+	    size_t n = std::min(len - r, mtub_);
+	    memcpy(wbuf_.s_, buf + r, n);
+	    post_send_with_buffer(wbuf_.data(), n);
+	    wbuf_consume();
+	    r += n;
+	}
 	return r;
     }
 
@@ -208,32 +220,26 @@ struct infb_conn {
 	    CHECK(ev_cq == cq_ && ev_ctx == (void*)context_);
 	    CHECK(ibv_req_notify_cq(cq_, 0));
 	}
-	ibv_wc wc[2];
+	ibv_wc wc[rx_depth_ + tx_depth_];
 	int ne;
 	do {
-	    CHECK((ne = ibv_poll_cq(cq_, 2, wc)) >= 0);
+	    CHECK((ne = ibv_poll_cq(cq_, rx_depth_ + tx_depth_, wc)) >= 0);
 	} while (!channel_ && ne < 1);
 	for (int i = 0; i < ne; ++i) {
 	    CHECK(wc[i].status == IBV_WC_SUCCESS);
-	    if (wc[i].wr_id == receive_work_request_id) {
-		pending_read_ += size_;
-		--rreq_;
-		//fprintf(stderr, "receive_work_done: %zd\n", pending_read_);
-	    } else if (wc[i].wr_id == send_work_request_id) {
-		write_room_ += size_;
-		//fprintf(stderr, "send_work_done: %zd\n", write_room_);
-	    } else {
-		assert(0 && "Bad wr_id");
-	    }
+	    if (recv_request(wc[i].wr_id))
+		pending_read_.push(refcomp::str((const char*)wc[i].wr_id, wc[i].byte_len));
+	    else
+		wbuf_extend(uintptr_t(wc[i].wr_id));
 	}
 	dispatch_once();
     }
     
     bool dispatch_once() {
 	int flags = 0;
-	if (pending_read_ > 0)
+	if (pending_read_.empty() == false)
 	    flags |= INFB_EV_READ;
-	if (write_room_ > 0)
+	if (wbuf_.length() > 0)
 	    flags |= INFB_EV_WRITE;
 	if (flags && w_)
 	    return w_->operator()(this, flags);
@@ -297,49 +303,68 @@ struct infb_conn {
     }
 
   private:
-    enum { receive_work_request_id = 1, send_work_request_id = 2 };
+    char* wbuf_start() {
+	return buf_.s_ + rx_depth_ * mtub_;
+    }
+    char* wbuf_end() {
+	return buf_.s_ + (rx_depth_ + tx_depth_) * mtub_;
+    }
+    void wbuf_consume() {
+	wbuf_.s_ += mtub_;
+	if (wbuf_.s_ == wbuf_end())
+	    wbuf_.s_ = wbuf_start();
+	wbuf_.len_ -= mtub_;
+    }
+    void wbuf_extend(uint64_t wrid) {
+	wbuf_.len_ += mtub_;
+    }
 
-    int post_recv(int n) {
+    int post_recv_with_id(char* p, size_t len) {
+	assert(len <= mtub_);
 	ibv_sge sge;
-	make_ibv_sge(sge, buffer_, size_, mr_->lkey);
+	make_ibv_sge(sge, p, len, mr_->lkey);
 
 	ibv_recv_wr wr;
 	bzero(&wr, sizeof(wr));
-	wr.wr_id = receive_work_request_id;
+	wr.wr_id = uintptr_t(p);
 	wr.sg_list = &sge;
 	wr.num_sge = 1;
 
 	ibv_recv_wr* bad_wr;
-	for (int i = 0; i < n; ++i)
-	    if (ibv_post_recv(qp_, &wr, &bad_wr)) {
-		perror("ibv_post_recv");
-		return i;
-	    }
-	return n;
+        if (ibv_post_recv(qp_, &wr, &bad_wr)) {
+  	    perror("ibv_post_recv");
+	    return -1;
+	}
+	return 0;
     }
 
-    int post_send(int n) {
+    int post_send_with_buffer(const char* buffer, size_t len) {
 	ibv_sge sge;
-	make_ibv_sge(sge, buffer_, size_, mr_->lkey);
+	make_ibv_sge(sge, buffer, len, mr_->lkey);
 	
 	ibv_send_wr wr;
 	bzero(&wr, sizeof(wr));
-	wr.wr_id = send_work_request_id;
+	wr.wr_id = uintptr_t(buffer);
 	wr.sg_list = &sge;
 	wr.num_sge = 1;
 	wr.opcode = IBV_WR_SEND;
 	wr.send_flags = IBV_SEND_SIGNALED;
 	
 	ibv_send_wr* bad_wr;
-	for (int i = 0; i < n; ++i)
-	    if (ibv_post_send(qp_, &wr, &bad_wr)) {
-		perror("ibv_post_send");
-		return i;
-	    }
-	return n;
+	if (ibv_post_send(qp_, &wr, &bad_wr)) {
+	    perror("ibv_post_send");
+	    return -1;
+	}
+	return 0;
     }
 
-    static void make_ibv_sge(ibv_sge& list, char* buffer, size_t size, uint32_t lkey) {
+    bool recv_request(uint64_t wrid) {
+	assert(wrid >= uintptr_t(buf_.data()));
+	assert(wrid < uintptr_t(buf_.data()) + buf_.length());
+	return wrid < uintptr_t(wbuf_start());
+    }
+
+    static void make_ibv_sge(ibv_sge& list, const char* buffer, size_t size, uint32_t lkey) {
 	list.addr = uintptr_t(buffer);
 	list.length = size;
 	list.lkey = lkey;
@@ -354,21 +379,20 @@ struct infb_conn {
     ibv_qp* qp_;
     ibv_port_attr portattr_;
 
-    size_t size_;
-    char* buffer_;
+    refcomp::str buf_; // the single read/write buffer
+
     int rx_depth_;
+    int tx_depth_;
     int ib_port_;
     int sl_;
     ibv_mtu mtu_;
+    size_t mtub_; // mtu in bytes
 
     infb_sockaddr local_;
     infb_sockaddr remote_;
 
     infb_ev_watcher* w_;
 
-    int rreq_; // number of outstanding read request
-    size_t pending_read_; // number of bytes pending
-    size_t write_room_;   // number of bytes avaiable in the write buffer
+    std::queue<refcomp::str> pending_read_; // available read scatter list
+    refcomp::str wbuf_; // available write buffer
 };
-
-

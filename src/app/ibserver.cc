@@ -1,7 +1,7 @@
 #include "ib.hh"
 #include "rpc_common/sock_helper.hh"
 
-static const size_t size = 4096;
+static const size_t size = 20;
 static char b[size];
 
 static void process_infb_event(infb_ev_watcher* w, int flags, infb_conn* c) {
@@ -26,12 +26,13 @@ int main(int, char*[]) {
     infb_conn conn;
     // the first infiniband port is 1
     int ib_port = 1;
-    int rx_depth = 1000;
+    int rx_depth = 20;
+    int tx_depth = 20;
     bool use_event = false;
     int sl = 0;
     ibv_mtu mtu = IBV_MTU_1024;
 
-    conn.create(NULL, ib_port, size, rx_depth, use_event, sl, mtu);
+    conn.create(NULL, ib_port, rx_depth, tx_depth, use_event, sl, mtu);
     conn.local_address().dump(stdout);
 
     int sfd = rpc::common::sock_helper::listen(8181);
