@@ -254,11 +254,13 @@ struct infb_conn {
 	if (dispatch_once())
 	    return;
 	if (channel_) {
-	    ibv_cq* ev_cq;
-	    void* ev_ctx;
-	    CHECK(ibv_get_cq_event(channel_, &ev_cq, &ev_ctx) == 0);
-	    CHECK(ev_cq == cq_ && ev_ctx == (void*)provider_->context());
-	    CHECK(ibv_req_notify_cq(cq_, 0));
+	    ibv_cq* cq;
+	    void* ctx;
+	    CHECK(ibv_get_cq_event(channel_, &cq, &ctx) == 0);
+	    CHECK(cq == cq_);
+	    // ctx is provided by user on ibv_create_cq
+	    CHECK(ctx == NULL);
+	    CHECK(ibv_req_notify_cq(cq_, 0) == 0);
 	}
 	ibv_wc wc[rx_depth_ + tx_depth_];
 	int ne;
