@@ -260,7 +260,8 @@ struct infb_conn {
 	    CHECK(cq == cq_);
 	    // ctx is provided by user on ibv_create_cq
 	    CHECK(ctx == NULL);
-	    CHECK(ibv_req_notify_cq(cq_, 0) == 0);
+	    ibv_ack_cq_events(cq, 1);
+	    CHECK(ibv_req_notify_cq(cq, 0) == 0);
 	}
 	ibv_wc wc[rx_depth_ + tx_depth_];
 	int ne;
