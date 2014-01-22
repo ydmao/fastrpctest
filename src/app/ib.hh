@@ -165,6 +165,12 @@ struct infb_conn {
 	// XXX: support user specified gid_index
 	local_.make(portattr_.lid, qp_->qp_num, 0, NULL);
 	wbuf_.assign(wbuf_start(), tx_depth_ * mtub_);
+
+	bzero(&attr, sizeof(attr));
+	bzero(&xattr, sizeof(xattr));
+	CHECK(ibv_query_qp(qp_, &xattr, IBV_QP_CAP, &attr) == 0);
+	max_inline_size_ = xattr.cap.max_inline_data;
+	printf("max_inline_size: %zd\n", max_inline_size_);
 	return 0;
     }
 
@@ -349,6 +355,8 @@ struct infb_conn {
 	wr.num_sge = 1;
 	wr.opcode = IBV_WR_SEND;
 	wr.send_flags = IBV_SEND_SIGNALED;
+	if (len <= max_inline_size_)
+	    wr.send_flags |= IBV_SEND_INLINE;
 	
 	ibv_send_wr* bad_wr;
 	if (ibv_post_send(qp_, &wr, &bad_wr)) {
@@ -387,6 +395,7 @@ struct infb_conn {
     int sl_;
     ibv_mtu mtu_;
     size_t mtub_; // mtu in bytes
+    size_t max_inline_size_;
 
     infb_sockaddr local_;
     infb_sockaddr remote_;
