@@ -7,6 +7,8 @@
 using namespace bench;
 using namespace rpc;
 
+const char* host_ = "localhost";
+
 int n_ = 0;
 volatile sig_atomic_t stop_ = false;
 void handle_alarm(int) {
@@ -30,7 +32,7 @@ struct check_echo {
 };
 
 void test_nop() {
-    bench::rpcc c("localhost", 8950, 1000);
+    bench::rpcc c(host_, 8950, 1000);
     stop_ = false;
     enum {duration = 5};
     alarm(duration);
@@ -43,24 +45,25 @@ void test_nop() {
     c.drain();
 }
 
-void test_echo() {
-    bench::rpcc c("localhost", 8950, 1000);
+void test_async_rtt() {
+    bench::rpcc c(host_, 8950, 1);
     stop_ = false;
     enum {duration = 5};
     alarm(duration);
     n_ = 0;
+    double t0 = rpc::common::now();
     while (!stop_) {
         c.echo("hellow world", check_echo());
         ++n_;
     }
-    std::cout << "test_echo: "<< (n_ / duration) << " echo/second\n";
+    std::cout << "test_async_rtt: "<< (1000000*(rpc::common::now() - t0)/n_) << " echo/second\n";
     c.drain();
 }
 
 void test_sync_client() {
     bench::TestServiceClient<rpc::sync_tcpconn> client;
     // connect to localhost:8950, using localhost and any port
-    client.init("localhost", 8950, "localhost", 0);
+    client.init(host_, 8950, "0.0.0.0", 0);
     bench::EchoRequest req;
     req.set_message("hello world");
     assert(client.send_echo(req));
@@ -71,35 +74,39 @@ void test_sync_client() {
     printf("test_sync_client: OK\n");
 }
 
-void test_ipoib_rtt() {
+void test_sync_rtt() {
     bench::TestServiceClient<rpc::sync_tcpconn> client;
     // connect to localhost:8950, using localhost and any port
-    client.init("192.168.100.10", 8950, "0.0.0.0", 0);
+    client.init(host_, 8950, "0.0.0.0", 0);
     bench::EchoRequest req;
     bench::EchoReply reply;
     req.set_message("hello world");
+
+    // make sure we are connected    
+    assert(client.send_echo(req));
+    assert(client.recv_echo(reply));
+
     int n = 0;
     double t0 = rpc::common::now();
     for (; rpc::common::now() - t0 < 5; ++n) {
         assert(client.send_echo(req));
-	reply.Clear();
+	//reply.Clear();
         assert(client.recv_echo(reply));
         assert(reply.message() == req.message());
     }
-    printf("test_ipoib_rtt: %.1f us/rtt\n", (rpc::common::now() - t0) * 1000000 / n);
+    printf("test_sync_rtt: %.1f us/rtt\n", (rpc::common::now() - t0) * 1000000 / n);
 }
 
 int main(int argc, char* argv[]) {
     int index = 0;
     if (argc > 1)
         index = atoi(argv[1]);
+    if (argc > 2)
+	host_ = argv[2];
     pin(ncore() - index - 1);
     signal(SIGALRM, handle_alarm);
-#if 1
-    test_echo();
+    test_async_rtt();
     test_sync_client();
-#else
-    test_ipoib_rtt();
-#endif
+    test_sync_rtt();
     return 0;
 }
