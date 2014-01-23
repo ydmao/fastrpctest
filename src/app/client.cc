@@ -3,6 +3,9 @@
 #include "proto/fastrpc_proto_client.hh"
 #include "rpc/sync_tcpconn.hh"
 #include "rpc_common/util.hh"
+#include "rpc/sync_rpc.hh"
+#include <thread>
+#include <string.h>
 
 using namespace bench;
 using namespace rpc;
@@ -56,7 +59,7 @@ void test_async_rtt() {
         c.echo("hellow world", check_echo());
         ++n_;
     }
-    std::cout << "test_async_rtt: "<< (1000000*(rpc::common::now() - t0)/n_) << " echo/second\n";
+    std::cout << "test_async_rtt: "<< (1000000*(rpc::common::now() - t0)/n_) << " us/rpc\n";
     c.drain();
 }
 
@@ -94,7 +97,40 @@ void test_sync_rtt() {
         assert(client.recv_echo(reply));
         assert(reply.message() == req.message());
     }
-    printf("test_sync_rtt: %.1f us/rtt\n", (rpc::common::now() - t0) * 1000000 / n);
+    printf("test_sync_rtt: %.1f us/rpc\n", (rpc::common::now() - t0) * 1000000 / n);
+}
+
+void test_sync_threaded_rtt() {
+    rpc::sync_tcpconn c;
+    c.init(host_, 8950, "0.0.0.0", 0);
+    assert(c.connect());
+    double sum = 0;
+    int n = 0;
+    std::thread th([&]{ 
+	    rpc::rpc_header h;
+	    bench::EchoReply r;
+	    while (rpc::read_reply(c.in(), r, h)) {
+		++n;
+	        double t = 0;
+		memcpy(&t, r.message().data(), sizeof(double));
+		asm volatile("");
+		sum += rpc::common::now() - t;
+	    }
+	});
+
+    bench::EchoRequest req;
+    double t0 = rpc::common::now();
+    for (; rpc::common::now() - t0 < 5; ) {
+	double t = rpc::common::now();
+	req.mutable_message()->assign((char*)&t, sizeof(t));
+	rpc::send_request(c.out(), ProcNumber::echo,
+			  n, 0, req);
+	c.out()->flush();
+	usleep(1);
+    }
+    c.shutdown();
+    th.join();
+    printf("test_sync_threaded_rtt: %.1f us/rpc\n", sum*1000000/n);
 }
 
 int main(int argc, char* argv[]) {
@@ -106,6 +142,7 @@ int main(int argc, char* argv[]) {
     pin(ncore() - index - 1);
     signal(SIGALRM, handle_alarm);
     test_async_rtt();
+    test_sync_threaded_rtt();
     test_sync_client();
     test_sync_rtt();
     return 0;
