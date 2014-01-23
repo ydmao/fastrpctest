@@ -86,52 +86,81 @@ struct infb_sockaddr {
     }
 };
 
-struct infb_conn {
-    infb_conn() : dev_(NULL), context_(NULL), channel_(NULL), w_(NULL) {
-    }
-    
-    int create(const char* dname, int ib_port,
-	       int rx_depth, int tx_depth,
-	       bool use_event, int sl, ibv_mtu mtu) {
-	ib_port_ = ib_port;
-	sl_ = sl;
-	mtu_ = mtu;
-	mtub_ = 128 << mtu;
-        tx_depth_ = tx_depth;
-	rx_depth_ = rx_depth;
+struct infb_provider {
+    static infb_provider* make(const char* dname = NULL) {
         ibv_device** dl = ibv_get_device_list(NULL);
 	CHECK(dl);
-        for (int i = 0; dl[i]; ++i)
-   	    if (!dname || !strcmp(ibv_get_device_name(dl[i]), dname)) {
-		dev_ = dl[i];
-		break;
-	    }
-	CHECK(dev_);
-	CHECK(context_ = ibv_open_device(dev_));
-	if (use_event) {
-	    CHECK(channel_ = ibv_create_comp_channel(context_));
+	ibv_device* d = NULL;
+	if (!dname) {
+	    d = dl[0];
+	} else {
+	    for (int i = 0; dl[i]; ++i)
+   	        if (!strcmp(ibv_get_device_name(dl[i]), dname)) {
+		    d = dl[i];
+		    break;
+	        }
 	}
-	CHECK(pd_ = ibv_alloc_pd(context_));
+	CHECK(d);
+	ibv_context* c = ibv_open_device(d);
+	CHECK(c);
+	return new infb_provider(d, c);
+    }
+    ibv_device* device() {
+	return d_;
+    }
+    ibv_context* context() {
+	return c_;
+    }
+  private:
+    infb_provider(ibv_device* d, ibv_context* c) : d_(d), c_(c) {
+    }
+    ibv_device* d_;
+    ibv_context* c_;
+};
+
+struct infb_conn {
+    infb_conn() : provider_(NULL), channel_(NULL), w_(NULL) {
+    }
+    
+    int create(infb_provider* provider, int ib_port, bool use_event, int sl) {
+	static const int max_inline_data = 400;
+	provider_ = provider;
+	// get port attributes
+	CHECK(ibv_query_port(provider->context(), ib_port, &portattr_) == 0);
+	//mtu_ = portattr_.active_mtu;
+	mtu_ = IBV_MTU_4096;
+	mtub_ = 128 << mtu_;
+	ib_port_ = ib_port;
+	sl_ = sl;
+        tx_depth_ = 1;
+	rx_depth_ = 10;
+
+	if (use_event) {
+	    CHECK(channel_ = ibv_create_comp_channel(provider->context()));
+	}
+	CHECK(pd_ = ibv_alloc_pd(provider->context()));
 
 	// create and register memory region of size_ bytes
 	const int page_size = sysconf(_SC_PAGESIZE);
 	buf_.len_ = round_up(mtub_ * (rx_depth_ + tx_depth_), page_size);
+	printf("allocating %d bytes\n", buf_.len_);
 	CHECK(buf_.s_ = (char*)memalign(page_size, buf_.len_));
 	bzero(buf_.s_, buf_.len_);
 	CHECK(mr_ = ibv_reg_mr(pd_, buf_.s_, buf_.len_, IBV_ACCESS_LOCAL_WRITE));
 
 	// create an completion queue with depth of rx_depth
-	CHECK(cq_ = ibv_create_cq(context_, rx_depth + tx_depth, NULL, channel_, 0));
+	CHECK(cq_ = ibv_create_cq(provider->context(), rx_depth_ + tx_depth_, NULL, channel_, 0));
 
 	// create a RC queue pair
 	ibv_qp_init_attr attr;
 	bzero(&attr, sizeof(attr));
 	attr.send_cq = cq_;
 	attr.recv_cq = cq_;
-	attr.cap.max_send_wr = tx_depth;
-	attr.cap.max_recv_wr = rx_depth;
+	attr.cap.max_send_wr = tx_depth_;
+	attr.cap.max_recv_wr = rx_depth_;
 	attr.cap.max_send_sge = 1;
 	attr.cap.max_recv_sge = 1;
+	attr.cap.max_inline_data = max_inline_data;
 	attr.qp_type = IBV_QPT_RC;
 	CHECK(qp_ = ibv_create_qp(pd_, &attr));
 
@@ -147,7 +176,7 @@ struct infb_conn {
 			    IBV_QP_PKEY_INDEX   |
 			    IBV_QP_PORT  	| 
 			    IBV_QP_ACCESS_FLAGS) == 0);
-	for (int i = 0; i < rx_depth; ++i)
+	for (int i = 0; i < rx_depth_; ++i)
 	    CHECK(post_recv_with_id(buf_.s_ + mtub_ * i, mtub_) == 0);
 
 	if (use_event) {
@@ -157,14 +186,18 @@ struct infb_conn {
 	    CHECK(ibv_req_notify_cq(cq_, 0) == 0);
 	}
 
-	// get port attributes
-	CHECK(ibv_query_port(context_, ib_port, &portattr_) == 0);
 	// if the link layer is Ethernet, portattr_.lid is not important;
 	// otherwise, we need a valid portattr_.lid.
 	CHECK(portattr_.link_layer == IBV_LINK_LAYER_ETHERNET || portattr_.lid);
 	// XXX: support user specified gid_index
 	local_.make(portattr_.lid, qp_->qp_num, 0, NULL);
 	wbuf_.assign(wbuf_start(), tx_depth_ * mtub_);
+
+	bzero(&attr, sizeof(attr));
+	bzero(&xattr, sizeof(xattr));
+	CHECK(ibv_query_qp(qp_, &xattr, IBV_QP_CAP, &attr) == 0);
+	max_inline_size_ = xattr.cap.max_inline_data;
+	printf("max_inline_size: %zd\n", max_inline_size_);
 	return 0;
     }
 
@@ -198,12 +231,19 @@ struct infb_conn {
 	    errno = EWOULDBLOCK;
 	    return -1;
 	}
+	if (len <= max_inline_size_ && wbuf_.length() == tx_depth_ * mtub_) {
+	    if (post_send_with_buffer(buf, len, IBV_SEND_SIGNALED | IBV_SEND_INLINE) == 0)
+	        return len;
+	    else
+		return -1;
+	}
 	assert(wbuf_.length() % mtub_ == 0);
 	ssize_t r = 0;
 	while (r < len && wbuf_.length()) {
 	    size_t n = std::min(len - r, mtub_);
 	    memcpy(wbuf_.s_, buf + r, n);
-	    post_send_with_buffer(wbuf_.data(), n);
+	    if (post_send_with_buffer(wbuf_.data(), n, IBV_SEND_SIGNALED) != 0)
+		return -1;
 	    wbuf_consume();
 	    r += n;
 	}
@@ -214,11 +254,14 @@ struct infb_conn {
 	if (dispatch_once())
 	    return;
 	if (channel_) {
-	    ibv_cq* ev_cq;
-	    void* ev_ctx;
-	    CHECK(ibv_get_cq_event(channel_, &ev_cq, &ev_ctx) == 0);
-	    CHECK(ev_cq == cq_ && ev_ctx == (void*)context_);
-	    CHECK(ibv_req_notify_cq(cq_, 0));
+	    ibv_cq* cq;
+	    void* ctx;
+	    CHECK(ibv_get_cq_event(channel_, &cq, &ctx) == 0);
+	    CHECK(cq == cq_);
+	    // ctx is provided by user on ibv_create_cq
+	    CHECK(ctx == NULL);
+	    ibv_ack_cq_events(cq, 1);
+	    CHECK(ibv_req_notify_cq(cq, 0) == 0);
 	}
 	ibv_wc wc[rx_depth_ + tx_depth_];
 	int ne;
@@ -229,7 +272,7 @@ struct infb_conn {
 	    CHECK(wc[i].status == IBV_WC_SUCCESS);
 	    if (recv_request(wc[i].wr_id))
 		pending_read_.push(refcomp::str((const char*)wc[i].wr_id, wc[i].byte_len));
-	    else
+	    else if (non_inline_send_request(wc[i].wr_id))
 		wbuf_extend(uintptr_t(wc[i].wr_id));
 	}
 	dispatch_once();
@@ -338,7 +381,7 @@ struct infb_conn {
 	return 0;
     }
 
-    int post_send_with_buffer(const char* buffer, size_t len) {
+    int post_send_with_buffer(const char* buffer, size_t len, int flags) {
 	ibv_sge sge;
 	make_ibv_sge(sge, buffer, len, mr_->lkey);
 	
@@ -348,8 +391,7 @@ struct infb_conn {
 	wr.sg_list = &sge;
 	wr.num_sge = 1;
 	wr.opcode = IBV_WR_SEND;
-	wr.send_flags = IBV_SEND_SIGNALED;
-	
+	wr.send_flags = flags;
 	ibv_send_wr* bad_wr;
 	if (ibv_post_send(qp_, &wr, &bad_wr)) {
 	    perror("ibv_post_send");
@@ -359,9 +401,12 @@ struct infb_conn {
     }
 
     bool recv_request(uint64_t wrid) {
-	assert(wrid >= uintptr_t(buf_.data()));
-	assert(wrid < uintptr_t(buf_.data()) + buf_.length());
-	return wrid < uintptr_t(wbuf_start());
+	return wrid >= uintptr_t(buf_.data()) && 
+	       wrid < uintptr_t(wbuf_start());
+    }
+    bool non_inline_send_request(uint64_t wrid) {
+	return wrid >= uintptr_t(wbuf_start()) && 
+	       wrid < uintptr_t(wbuf_end());
     }
 
     static void make_ibv_sge(ibv_sge& list, const char* buffer, size_t size, uint32_t lkey) {
@@ -370,8 +415,7 @@ struct infb_conn {
 	list.lkey = lkey;
     }
 
-    ibv_device* dev_;
-    ibv_context* context_;
+    infb_provider* provider_;
     ibv_comp_channel* channel_;
     ibv_pd* pd_;
     ibv_mr* mr_;
@@ -387,6 +431,7 @@ struct infb_conn {
     int sl_;
     ibv_mtu mtu_;
     size_t mtub_; // mtu in bytes
+    size_t max_inline_size_;
 
     infb_sockaddr local_;
     infb_sockaddr remote_;

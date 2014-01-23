@@ -36,13 +36,10 @@ int main(int, char*[]) {
     infb_conn conn;
     // the first infiniband port is 1
     int ib_port = 1;
-    int rx_depth = 20;
-    int tx_depth = 20;
     bool use_event = false;
     int sl = 0;
-    ibv_mtu mtu = IBV_MTU_1024;
 
-    conn.create(NULL, ib_port, rx_depth, tx_depth, use_event, sl, mtu);
+    conn.create(infb_provider::make(), ib_port, use_event, sl);
     conn.local_address().dump(stdout);
 
     int fd = rpc::common::sock_helper::connect("192.168.100.11", 8181);
