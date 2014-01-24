@@ -55,10 +55,8 @@ void test_async_rtt() {
     alarm(duration);
     n_ = 0;
     double t0 = rpc::common::now();
-    while (!stop_) {
+    while (!stop_)
         c.echo("hellow world", check_echo());
-        ++n_;
-    }
     std::cout << "test_async_rtt: "<< (1000000*(rpc::common::now() - t0)/n_) << " us/rpc\n";
     c.drain();
 }
