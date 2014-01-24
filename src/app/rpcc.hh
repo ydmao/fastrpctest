@@ -8,7 +8,7 @@ namespace bench {
 
 struct rpcc : public rpc::async_batched_rpcc {
     rpcc(const char *host, int port, int w)
-        : rpc::async_batched_rpcc(host, port, 0, w) {
+        : rpc::async_batched_rpcc(host, "0.0.0.0", port, 0, w) {
     }
     template <typename F>
     void nop(F callback) {
