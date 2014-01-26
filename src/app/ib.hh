@@ -424,22 +424,22 @@ struct infb_conn {
     }
 
     int real_read(bool blocking) {
+	if (blocking)
+	    wait_channel(cf_->read_channel(), rcq_, rx_depth_);
 	auto f = [&](const ibv_wc& wc) {
 	   	assert(recv_request(wc.wr_id));
 		pending_read_.push(refcomp::str((const char*)wc.wr_id, wc.byte_len));
 	    };
-	if (blocking)
-	    wait_channel(cf_->read_channel(), rcq_, rx_depth_);
 	return poll(blocking, rcq_, f);
     }
     int real_write(bool blocking) {
+	if (blocking)
+	    wait_channel(cf_->write_channel(), scq_, tx_depth_);
 	auto f = [&](const ibv_wc& wc) {
 	        if (non_inline_send_request(wc.wr_id))
 	            wbuf_extend(uintptr_t(wc.wr_id));
 		--nw_;
 	    };
-	if (blocking)
-	    wait_channel(cf_->write_channel(), scq_, tx_depth_);
 	return poll(blocking, scq_, f);
     }
 
@@ -494,6 +494,7 @@ struct infb_conn {
 	    perror("ibv_post_send");
 	    return -1;
 	}
+	//fprintf(stderr, "written\n");
 	++nw_;
 	return 0;
     }
@@ -598,11 +599,12 @@ struct infb_loop : public infb_conn_factory {
 	void* ctx;
 	CHECK(ibv_get_cq_event(channel_, &cq, &ctx) == 0);
 	CHECK(ctx != NULL);
+	ibv_ack_cq_events(cq, 1);
+	CHECK(ibv_req_notify_cq(cq, 0) == 0);
+
 	infb_ev_watcher* w = reinterpret_cast<infb_ev_watcher*>(ctx);
 	bool r = w->conn()->read_cq(cq);
 	w->operator()(r ? INFB_EV_READ : INFB_EV_WRITE);
-	ibv_ack_cq_events(cq, 1);
-	CHECK(ibv_req_notify_cq(cq, 0) == 0);
     }
     infb_provider* provider() {
 	return p_;
