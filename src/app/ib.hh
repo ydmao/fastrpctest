@@ -418,8 +418,6 @@ struct infb_conn {
 		fprintf(stderr, "poll failed with status: %d\n", wc[i].status);
 		return -1;
 	    }
-	    if (cq == scq_)
-		--nw_;
 	    f(wc[i]);
 	}
 	return 0;
@@ -437,7 +435,8 @@ struct infb_conn {
     int real_write(bool blocking) {
 	auto f = [&](const ibv_wc& wc) {
 	        if (non_inline_send_request(wc.wr_id))
-	                pending_read_.push(refcomp::str((const char*)wc.wr_id, wc.byte_len));
+	            wbuf_extend(uintptr_t(wc.wr_id));
+		--nw_;
 	    };
 	if (blocking)
 	    wait_channel(cf_->write_channel(), scq_, tx_depth_);
