@@ -133,7 +133,7 @@ struct infb_conn {
 	ib_port_ = ib_port;
 	sl_ = sl;
         tx_depth_ = 1;
-	rx_depth_ = 10;
+	rx_depth_ = 9;
 
 	if (use_event) {
 	    CHECK(channel_ = ibv_create_comp_channel(provider->context()));
@@ -149,13 +149,15 @@ struct infb_conn {
 	CHECK(mr_ = ibv_reg_mr(pd_, buf_.s_, buf_.len_, IBV_ACCESS_LOCAL_WRITE));
 
 	// create an completion queue with depth of rx_depth
-	CHECK(cq_ = ibv_create_cq(provider->context(), rx_depth_ + tx_depth_, NULL, channel_, 0));
+	CHECK(rcq_ = ibv_create_cq(provider->context(), rx_depth_, NULL, channel_, 0));
+	// create an completion queue with depth of tx_depth
+	CHECK(scq_ = ibv_create_cq(provider->context(), tx_depth_, NULL, channel_, 0));
 
 	// create a RC queue pair
 	ibv_qp_init_attr attr;
 	bzero(&attr, sizeof(attr));
-	attr.send_cq = cq_;
-	attr.recv_cq = cq_;
+	attr.send_cq = scq_;
+	attr.recv_cq = rcq_;
 	attr.cap.max_send_wr = tx_depth_;
 	attr.cap.max_recv_wr = rx_depth_;
 	attr.cap.max_send_sge = 1;
@@ -183,7 +185,8 @@ struct infb_conn {
             // when a completion queue entry (CQE) is placed on the CQ,
             // send a completion event to channel_ if the channel_ is empty.
             // mimics the level-trigger file descriptors
-	    CHECK(ibv_req_notify_cq(cq_, 0) == 0);
+	    CHECK(ibv_req_notify_cq(scq_, 0) == 0);
+	    CHECK(ibv_req_notify_cq(rcq_, 0) == 0);
 	}
 
 	// if the link layer is Ethernet, portattr_.lid is not important;
@@ -257,7 +260,7 @@ struct infb_conn {
 	    ibv_cq* cq;
 	    void* ctx;
 	    CHECK(ibv_get_cq_event(channel_, &cq, &ctx) == 0);
-	    CHECK(cq == cq_);
+	    CHECK(cq == rcq_ || cq == scq_);
 	    // ctx is provided by user on ibv_create_cq
 	    CHECK(ctx == NULL);
 	    ibv_ack_cq_events(cq, 1);
@@ -266,7 +269,10 @@ struct infb_conn {
 	ibv_wc wc[rx_depth_ + tx_depth_];
 	int ne;
 	do {
-	    CHECK((ne = ibv_poll_cq(cq_, rx_depth_ + tx_depth_, wc)) >= 0);
+	    int nr, ns;
+	    CHECK((nr = ibv_poll_cq(rcq_, rx_depth_, wc)) >= 0);
+	    CHECK((ns = ibv_poll_cq(scq_, tx_depth_, wc + nr)) >= 0);
+	    ne = nr + ns;
 	} while (!channel_ && ne < 1);
 	for (int i = 0; i < ne; ++i) {
 	    CHECK(wc[i].status == IBV_WC_SUCCESS);
@@ -419,7 +425,8 @@ struct infb_conn {
     ibv_comp_channel* channel_;
     ibv_pd* pd_;
     ibv_mr* mr_;
-    ibv_cq* cq_;
+    ibv_cq* scq_;
+    ibv_cq* rcq_;
     ibv_qp* qp_;
     ibv_port_attr portattr_;
 
