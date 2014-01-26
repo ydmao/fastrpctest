@@ -95,8 +95,6 @@ struct infb_sockaddr {
 };
 
 struct infb_conn_factory {
-    virtual ibv_comp_channel* read_channel() = 0;
-    virtual ibv_comp_channel* write_channel() = 0;
     virtual bool blocking() = 0;
     virtual infb_conn* make_conn() = 0;
 };
@@ -153,12 +151,6 @@ struct infb_poll_factory : public infb_conn_factory {
     infb_conn* make_conn();
     infb_poll_factory(infb_provider* p) : p_(p) {
     }
-    ibv_comp_channel* read_channel() {
-	return NULL;
-    }
-    ibv_comp_channel* write_channel() {
-	return NULL;
-    }
     bool blocking() {
 	return true;
     }
@@ -172,28 +164,21 @@ struct infb_interrupt_factory : public infb_conn_factory {
 
     infb_interrupt_factory(infb_provider* p) {
 	p_ = p;
-	CHECK(rchan_ = ibv_create_comp_channel(p->context()));
-	CHECK(schan_ = ibv_create_comp_channel(p->context()));
-    }
-    ibv_comp_channel* read_channel() {
-	return rchan_;
-    }
-    ibv_comp_channel* write_channel() {
-	return schan_;
     }
     bool blocking() {
 	return true;
     }
   private:
     infb_provider* p_;
-    ibv_comp_channel* rchan_;
-    ibv_comp_channel* schan_;
 };
 
 struct infb_conn {
-    infb_conn(infb_conn_factory* cf, infb_provider* p, void* cqctx) : p_(p), cf_(cf), cqctx_(cqctx) {
+    infb_conn(infb_conn_factory* cf, infb_provider* p, ibv_comp_channel* schan, 
+	      ibv_comp_channel* rchan, void* cqctx) 
+	: p_(p), cf_(cf), cqctx_(cqctx), schan_(schan), rchan_(rchan) {
     }
-    infb_conn(infb_conn_factory* cf, infb_provider* p) : infb_conn(cf, p, this) {
+    infb_conn(infb_conn_factory* cf, infb_provider* p, ibv_comp_channel* schan,
+	      ibv_comp_channel* rchan) : infb_conn(cf, p, schan, rchan, this) {
     }
 
     ibv_cq* create_cq(ibv_comp_channel* channel, int depth) {
@@ -228,8 +213,8 @@ struct infb_conn {
 	bzero(buf_.s_, buf_.len_);
 	CHECK(mr_ = ibv_reg_mr(pd_, buf_.s_, buf_.len_, IBV_ACCESS_LOCAL_WRITE));
 	
-	rcq_ = create_cq(cf_->read_channel(), rx_depth_);
-	scq_ = create_cq(cf_->write_channel(), tx_depth_);
+	rcq_ = create_cq(rchan_, rx_depth_);
+	scq_ = create_cq(schan_, tx_depth_);
 
 	// create a RC queue pair
 	ibv_qp_init_attr attr;
@@ -425,7 +410,7 @@ struct infb_conn {
 
     int real_read(bool blocking) {
 	if (blocking)
-	    wait_channel(cf_->read_channel(), rcq_, rx_depth_);
+	    wait_channel(rchan_, rcq_, rx_depth_);
 	auto f = [&](const ibv_wc& wc) {
 	   	assert(recv_request(wc.wr_id));
 		pending_read_.push(refcomp::str((const char*)wc.wr_id, wc.byte_len));
@@ -434,7 +419,7 @@ struct infb_conn {
     }
     int real_write(bool blocking) {
 	if (blocking)
-	    wait_channel(cf_->write_channel(), scq_, tx_depth_);
+	    wait_channel(schan_, scq_, tx_depth_);
 	auto f = [&](const ibv_wc& wc) {
 	        if (non_inline_send_request(wc.wr_id))
 	            wbuf_extend(uintptr_t(wc.wr_id));
@@ -539,6 +524,8 @@ struct infb_conn {
     refcomp::str wbuf_; // available write buffer
     int nw_; // number of outstanding writes
     void* cqctx_;
+    ibv_comp_channel* schan_;
+    ibv_comp_channel* rchan_;
 };
 
 struct infb_loop : public infb_conn_factory {
@@ -552,7 +539,7 @@ struct infb_loop : public infb_conn_factory {
     }
     infb_conn* make_conn() {
 	infb_ev_watcher* w = new infb_ev_watcher();
-	infb_conn* c = new infb_conn(this, p_, w);
+	infb_conn* c = new infb_conn(this, p_, channel_, channel_, w);
 	c->create();
 	w->c_ = c;
 	wch_.push_back(w);
@@ -562,12 +549,6 @@ struct infb_loop : public infb_conn_factory {
 	void* cqctx = c->cqctx();
 	assert(cqctx != c);
 	return reinterpret_cast<infb_ev_watcher*>(cqctx);
-    }
-    ibv_comp_channel* read_channel() {
-	return channel_;
-    }
-    ibv_comp_channel* write_channel() {
-	return channel_;
     }
     bool blocking() {
 	return false;
@@ -666,13 +647,17 @@ struct infb_client {
 };
 
 infb_conn* infb_poll_factory::make_conn() {
-    infb_conn* c = new infb_conn(this, p_);
+    infb_conn* c = new infb_conn(this, p_, NULL, NULL);
     c->create();
     return c;
 }
 
 infb_conn* infb_interrupt_factory::make_conn() {
-    infb_conn* c = new infb_conn(this, p_);
+    ibv_comp_channel* rchan;
+    ibv_comp_channel* schan;
+    CHECK(rchan = ibv_create_comp_channel(p_->context()));
+    CHECK(schan = ibv_create_comp_channel(p_->context()));
+    infb_conn* c = new infb_conn(this, p_, schan, rchan);
     c->create();
     return c;
 }
