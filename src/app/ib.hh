@@ -265,6 +265,7 @@ struct infb_conn {
 	// XXX: support user specified gid_index
 	local_.make(portattr_.lid, qp_->qp_num, 0, NULL);
 	wbuf_.assign(wbuf_start(), tx_depth_ * mtub_);
+	nw_ = 0;
 
 	bzero(&attr, sizeof(attr));
 	bzero(&xattr, sizeof(xattr));
@@ -297,8 +298,8 @@ struct infb_conn {
     }
 
     ssize_t write(const char* buf, size_t len) {
-        // XXX: why can't only write if no buffer?
-	real_write(cf_->blocking());
+	if (nw_ == tx_depth_)
+	    real_write(cf_->blocking());
 
 	if (wbuf_.length() == 0) {
 	    errno = EWOULDBLOCK;
@@ -405,7 +406,7 @@ struct infb_conn {
     }
 
     template <typename F>
-    void poll(bool blocking, ibv_cq* cq, F f) {
+    int poll(bool blocking, ibv_cq* cq, F f) {
 	int depth = (cq == scq_) ? tx_depth_ : rx_depth_;
 	ibv_wc wc[depth];
 	int ne;
@@ -413,34 +414,34 @@ struct infb_conn {
 	    CHECK((ne = ibv_poll_cq(cq, depth, wc)) >= 0);
 	} while (blocking && ne < 1);
 	for (int i = 0; i < ne; ++i) {
-	    CHECK(wc[i].status == IBV_WC_SUCCESS);
+	    if (wc[i].status != IBV_WC_SUCCESS) {
+		fprintf(stderr, "poll failed with status: %d\n", wc[i].status);
+		return -1;
+	    }
+	    if (cq == scq_)
+		--nw_;
 	    f(wc[i]);
 	}
+	return 0;
     }
 
-    void real_read(bool blocking) {
+    int real_read(bool blocking) {
 	auto f = [&](const ibv_wc& wc) {
 	   	assert(recv_request(wc.wr_id));
 		pending_read_.push(refcomp::str((const char*)wc.wr_id, wc.byte_len));
 	    };
 	if (blocking)
 	    wait_channel(cf_->read_channel(), rcq_, rx_depth_);
-	poll(blocking, rcq_, f);
+	return poll(blocking, rcq_, f);
     }
-    void real_write(bool blocking) {
+    int real_write(bool blocking) {
 	auto f = [&](const ibv_wc& wc) {
 	        if (non_inline_send_request(wc.wr_id))
 	                pending_read_.push(refcomp::str((const char*)wc.wr_id, wc.byte_len));
 	    };
 	if (blocking)
 	    wait_channel(cf_->write_channel(), scq_, tx_depth_);
-	poll(blocking, scq_, f);
-    }
-    void real_io(ibv_cq* cq, bool blocking) {
-	if (cq == scq_)
-	    real_write(blocking);
-	else
-	    real_read(blocking);
+	return poll(blocking, scq_, f);
     }
 
     char* wbuf_start() {
@@ -494,6 +495,7 @@ struct infb_conn {
 	    perror("ibv_post_send");
 	    return -1;
 	}
+	++nw_;
 	return 0;
     }
 
@@ -535,6 +537,7 @@ struct infb_conn {
 
     std::queue<refcomp::str> pending_read_; // available read scatter list
     refcomp::str wbuf_; // available write buffer
+    int nw_; // number of outstanding writes
     void* cqctx_;
 };
 
