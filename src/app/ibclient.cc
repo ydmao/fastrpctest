@@ -1,5 +1,4 @@
 #include "ib.hh"
-#include "rpc_common/sock_helper.hh"
 #include "rpc_common/util.hh"
 
 const size_t size = 20;
@@ -23,44 +22,24 @@ static void process_infb_event(infb_ev_watcher* w, int flags, infb_conn* c) {
 		    iters, t, t * 1000000 / iters);
 	    exit(0);
 	}
-	w->start(INFB_EV_WRITE);
+	w->set(INFB_EV_WRITE);
     } else if (flags & INFB_EV_WRITE) {
 	static int iters = 1;
 	sprintf(b, "c_%d", iters++);
 	assert(c->write(b, sizeof(b)) == sizeof(b));
-	w->start(INFB_EV_READ);
+	w->set(INFB_EV_READ);
     }
 }
 
 int main(int, char*[]) {
-    infb_conn conn;
-    // the first infiniband port is 1
-    int ib_port = 1;
-    bool use_event = false;
-    int sl = 0;
-
-    conn.create(infb_provider::make(), ib_port, use_event, sl);
-    conn.local_address().dump(stdout);
-
-    int fd = rpc::common::sock_helper::connect("192.168.100.11", 8181);
-    assert(fd >= 0);
-    const infb_sockaddr& local = conn.local_address();
-    assert(write(fd, &local, sizeof(local)) == sizeof(local));
-    infb_sockaddr remote;
-    assert(read(fd, &remote, sizeof(remote)) == sizeof(remote));
-
-    remote.dump(stdout);
-    assert(conn.connect(remote) == 0);
-
-    infb_ev_watcher w;
-    w.set(process_infb_event);
-    w.start(INFB_EV_READ);
-    conn.set_ev_watcher(&w);
+    infb_loop* loop = infb_loop::make(infb_provider::default_instance());
+    infb_conn* c = infb_client::connect("192.168.100.11", 8181, loop);
+    infb_ev_watcher* w = loop->ev_watcher(c);
+    w->set(process_infb_event);
+    w->set(INFB_EV_READ);
     sprintf(b, "c_0");
-    conn.write(b, sizeof(b));
-    while (true) {
-	conn.loop_once();
-    }
-
+    c->write(b, sizeof(b));
+    while (true)
+	loop->loop_once();
     return 0;
 }
