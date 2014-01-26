@@ -20,7 +20,7 @@
 
 #define CHECK(x) { if(!(x)){ \
                      fprintf(stderr, "CHECK(%s) failed %s:%d\n", \
-                             #x, __FILE__, __LINE__); perror("check:"); exit(1); } }
+                             #x, __FILE__, __LINE__); perror("check"); exit(1); } }
 
 struct infb_conn;
 
@@ -274,7 +274,8 @@ struct infb_conn {
 	return 0;
     }
     ssize_t read(char* buf, size_t len) {
-	real_read(cf_->blocking());
+	if (pending_read_.empty())
+	    real_read(cf_->blocking());
 	if (pending_read_.empty()) {
 	    errno = EWOULDBLOCK;
 	    return -1;
@@ -296,6 +297,7 @@ struct infb_conn {
     }
 
     ssize_t write(const char* buf, size_t len) {
+        // XXX: why can't only write if no buffer?
 	real_write(cf_->blocking());
 
 	if (wbuf_.length() == 0) {
@@ -404,7 +406,7 @@ struct infb_conn {
 
     template <typename F>
     void poll(bool blocking, ibv_cq* cq, F f) {
-	int depth = cq == scq_ ? tx_depth_ : rx_depth_;
+	int depth = (cq == scq_) ? tx_depth_ : rx_depth_;
 	ibv_wc wc[depth];
 	int ne;
 	do {
