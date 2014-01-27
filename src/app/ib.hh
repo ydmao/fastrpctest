@@ -12,6 +12,7 @@
 #include <sys/time.h>
 #include <queue>
 #include <thread>
+#include <stdarg.h>
 
 #include "rpc_common/sock_helper.hh"
 #include "compiler/str.hh"
@@ -22,6 +23,18 @@
 #define CHECK(x) { if(!(x)){ \
                      fprintf(stderr, "CHECK(%s) failed %s:%d\n", \
                              #x, __FILE__, __LINE__); perror("check"); exit(1); } }
+
+enum { nodebug = 1 };
+
+inline void dbg(const char* fmt, ...) {
+    if (nodebug)
+	return;
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+    fflush(stdout);
+}
 
 struct infb_conn;
 
@@ -49,8 +62,10 @@ struct infb_ev_watcher {
     }
     bool operator()(int flags) {
 	int interest = flags & flags_;
-	if (cb_ && interest)
+	if (cb_ && interest) {
+	    dbg("infb_ev_watcher::(): dispatch %d\n", interest);
 	    cb_(this, interest);
+	}
 	return interest;
     }
     void set(cb_type cb) {
@@ -525,7 +540,7 @@ struct infb_conn {
 	    perror("ibv_post_send");
 	    return -1;
 	}
-	//fprintf(stderr, "written\n");
+	dbg("post_send_with_buffer: sent %zd bytes\n", len);
 	++nw_;
 	return 0;
     }
@@ -606,6 +621,7 @@ struct infb_loop : public infb_conn_factory {
 	for (int i = 0; i < (int)wch_.size(); ++i) {
 	    int flags = wch_[i]->conn()->readable() ? INFB_EV_READ : 0;
 	    flags |= wch_[i]->conn()->writable() ? INFB_EV_WRITE : 0;
+   	    dbg("loop_once: dispatch before querying for CQE\n");
 	    wch_[i]->operator()(flags);
 	    if (unlikely(deletion_)) {
 		deletion_ = false;
@@ -614,12 +630,14 @@ struct infb_loop : public infb_conn_factory {
 	}
 	if (!wch_.size())
 	    return;
+	dbg("loop_once: wait for CQE\n");
 	ibv_cq* cq;
 	void* ctx;
 	CHECK(ibv_get_cq_event(c_, &cq, &ctx) == 0);
 	CHECK(ctx != NULL);
 	ibv_ack_cq_events(cq, 1);
 	CHECK(ibv_req_notify_cq(cq, 0) == 0);
+	dbg("loop_once: got CQE\n");
 
 	// It is possible that we have already processed the CQ
 	// corresponding to this CQE. As a result, we only dispatch
