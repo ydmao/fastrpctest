@@ -8,16 +8,16 @@ namespace bench {
 
 struct rpcc : public rpc::async_batched_rpcc {
     rpcc(const char *host, int port, int w)
-        : rpc::async_batched_rpcc(host, "0.0.0.0", port, 0, w) {
+        : rpc::async_batched_rpcc(host, port, w) {
     }
     template <typename F>
-    void nop(F callback) {
-        auto g = new rpc::gcrequest<ProcNumber::nop, F>(callback);
+    void nop(F cb) {
+        auto g = new rpc::gcrequest<ProcNumber::nop>(cb);
         call(g);
     }
     template <typename F>
-    void echo(const std::string& v, F callback) {
-        auto g = new rpc::gcrequest<ProcNumber::echo, F>(callback);
+    void echo(const std::string& v, F cb) {
+        auto g = new rpc::gcrequest<ProcNumber::echo>(cb);
         g->req_.set_message(v);
         call(g);
     }
