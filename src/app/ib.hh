@@ -94,9 +94,14 @@ struct infb_sockaddr {
     }
 };
 
+struct infb_provider;
+
 struct infb_conn_factory {
-    virtual bool blocking() = 0;
+    infb_conn_factory(infb_provider* p) : p_(p) {}
+    virtual ~infb_conn_factory() {}
     virtual infb_conn* make_conn() = 0;
+  protected:
+    infb_provider* p_;
 };
 
 struct infb_provider {
@@ -149,36 +154,25 @@ struct infb_provider {
 // blocking poll socket
 struct infb_poll_factory : public infb_conn_factory {
     infb_conn* make_conn();
-    infb_poll_factory(infb_provider* p) : p_(p) {
+    infb_poll_factory(infb_provider* p) : infb_conn_factory(p) {
     }
-    bool blocking() {
-	return true;
-    }
-  private:
-    infb_provider* p_;
 };
 
 // blocking interrupt connection
 struct infb_interrupt_factory : public infb_conn_factory {
     infb_conn* make_conn();
 
-    infb_interrupt_factory(infb_provider* p) {
-	p_ = p;
+    infb_interrupt_factory(infb_provider* p) : infb_conn_factory(p) {
     }
-    bool blocking() {
-	return true;
-    }
-  private:
-    infb_provider* p_;
 };
 
 struct infb_conn {
-    infb_conn(infb_conn_factory* cf, infb_provider* p, ibv_comp_channel* schan, 
+    infb_conn(bool blocking, infb_provider* p, ibv_comp_channel* schan, 
 	      ibv_comp_channel* rchan, void* cqctx) 
-	: p_(p), cf_(cf), cqctx_(cqctx), schan_(schan), rchan_(rchan) {
+	: p_(p), blocking_(blocking), cqctx_(cqctx), schan_(schan), rchan_(rchan) {
     }
-    infb_conn(infb_conn_factory* cf, infb_provider* p, ibv_comp_channel* schan,
-	      ibv_comp_channel* rchan) : infb_conn(cf, p, schan, rchan, this) {
+    infb_conn(bool blocking, infb_provider* p, ibv_comp_channel* schan,
+	      ibv_comp_channel* rchan) : infb_conn(blocking, p, schan, rchan, this) {
     }
 
     ibv_cq* create_cq(ibv_comp_channel* channel, int depth) {
@@ -261,7 +255,7 @@ struct infb_conn {
     }
     ssize_t read(char* buf, size_t len) {
 	if (pending_read_.empty())
-	    real_read(cf_->blocking());
+	    real_read(blocking_);
 	if (pending_read_.empty()) {
 	    errno = EWOULDBLOCK;
 	    return -1;
@@ -284,7 +278,7 @@ struct infb_conn {
 
     ssize_t write(const char* buf, size_t len) {
 	if (nw_ == tx_depth_)
-	    real_write(cf_->blocking());
+	    real_write(blocking_);
 
 	if (wbuf_.length() == 0) {
 	    errno = EWOULDBLOCK;
@@ -479,7 +473,7 @@ struct infb_conn {
 	    perror("ibv_post_send");
 	    return -1;
 	}
-	//fprintf(stderr, "written\n");
+	fprintf(stderr, "written\n");
 	++nw_;
 	return 0;
     }
@@ -518,7 +512,7 @@ struct infb_conn {
     infb_sockaddr local_;
     infb_sockaddr remote_;
 
-    infb_conn_factory* cf_;
+    bool blocking_;
 
     std::queue<refcomp::str> pending_read_; // available read scatter list
     refcomp::str wbuf_; // available write buffer
@@ -532,14 +526,11 @@ struct infb_loop : public infb_conn_factory {
     static infb_loop* make(infb_provider* p) {
 	ibv_comp_channel* c = NULL;
 	CHECK(c = ibv_create_comp_channel(p->context()));
-        infb_loop* loop = new infb_loop;
-	loop->p_ = p;
-	loop->channel_ = c;
-	return loop;
+        return new infb_loop(p, c);
     }
     infb_conn* make_conn() {
 	infb_ev_watcher* w = new infb_ev_watcher();
-	infb_conn* c = new infb_conn(this, p_, channel_, channel_, w);
+	infb_conn* c = new infb_conn(false, p_, c_, c_, w);
 	c->create();
 	w->c_ = c;
 	wch_.push_back(w);
@@ -549,9 +540,6 @@ struct infb_loop : public infb_conn_factory {
 	void* cqctx = c->cqctx();
 	assert(cqctx != c);
 	return reinterpret_cast<infb_ev_watcher*>(cqctx);
-    }
-    bool blocking() {
-	return false;
     }
     void destroy(infb_ev_watcher* w) {
 	for (auto it = wch_.begin(); it != wch_.end(); it++)
@@ -578,7 +566,7 @@ struct infb_loop : public infb_conn_factory {
 	    return;
 	ibv_cq* cq;
 	void* ctx;
-	CHECK(ibv_get_cq_event(channel_, &cq, &ctx) == 0);
+	CHECK(ibv_get_cq_event(c_, &cq, &ctx) == 0);
 	CHECK(ctx != NULL);
 	ibv_ack_cq_events(cq, 1);
 	CHECK(ibv_req_notify_cq(cq, 0) == 0);
@@ -593,10 +581,9 @@ struct infb_loop : public infb_conn_factory {
 	return p_;
     }
   private:
-    infb_loop() : p_(NULL), channel_(NULL) {
+    infb_loop(infb_provider* p, ibv_comp_channel* c) : infb_conn_factory(p), c_(c) {
     }
-    infb_provider* p_;
-    ibv_comp_channel* channel_;
+    ibv_comp_channel* c_;
     std::vector<infb_ev_watcher*> wch_;
     bool deletion_;
 };
@@ -649,7 +636,7 @@ struct infb_client {
 };
 
 infb_conn* infb_poll_factory::make_conn() {
-    infb_conn* c = new infb_conn(this, p_, NULL, NULL);
+    infb_conn* c = new infb_conn(true, p_, NULL, NULL);
     c->create();
     return c;
 }
@@ -659,7 +646,7 @@ infb_conn* infb_interrupt_factory::make_conn() {
     ibv_comp_channel* schan;
     CHECK(rchan = ibv_create_comp_channel(p_->context()));
     CHECK(schan = ibv_create_comp_channel(p_->context()));
-    infb_conn* c = new infb_conn(this, p_, schan, rchan);
+    infb_conn* c = new infb_conn(true, p_, schan, rchan);
     c->create();
     return c;
 }
