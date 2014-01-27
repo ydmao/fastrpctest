@@ -307,7 +307,7 @@ struct infb_conn {
 	    errno = EWOULDBLOCK;
 	    return -1;
 	}
-	if (len <= max_inline_size_ && wbuf_.length() == tx_depth_ * mtub_) {
+	if (len <= max_inline_size_) {
 	    if (post_send_with_buffer(buf, len, IBV_SEND_SIGNALED | IBV_SEND_INLINE) == 0)
 	        return len;
 	    else
@@ -388,7 +388,7 @@ struct infb_conn {
 	return !pending_read_.empty();
     }
     bool writable() const {
-	return nw_ != tx_depth_;
+	return nw_ < tx_depth_;
     }
     void* cqctx() {
 	return cqctx_;
@@ -495,7 +495,7 @@ struct infb_conn {
 	    perror("ibv_post_send");
 	    return -1;
 	}
-	fprintf(stderr, "written\n");
+	//fprintf(stderr, "written\n");
 	++nw_;
 	return 0;
     }
