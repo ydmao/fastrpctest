@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
 	while (true) {
             infb_loop* loop = infb_loop::make(infb_provider::default_instance());
 	    infb_conn* c = s.accept(loop);
-	    std::thread t([&]{
+	    std::thread t([=]{
                 infb_ev_watcher* w = loop->ev_watcher(c);
 	        client* clt = new client;
 	        using std::placeholders::_1;
