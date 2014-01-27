@@ -117,6 +117,8 @@ struct infb_conn_factory {
     virtual ~infb_conn_factory() {}
     virtual infb_conn* make_conn() = 0;
   protected:
+    friend class infb_conn;
+    virtual void destroy_conn(infb_conn* conn) = 0;
     infb_provider* p_;
 };
 
@@ -196,6 +198,7 @@ struct infb_provider {
 // blocking poll socket
 struct infb_poll_factory : public infb_conn_factory {
     infb_conn* make_conn();
+    void destroy_conn(infb_conn*);
     infb_poll_factory(infb_provider* p) : infb_conn_factory(p) {
     }
     static infb_poll_factory* default_instance() {
@@ -209,6 +212,7 @@ struct infb_poll_factory : public infb_conn_factory {
 // blocking interrupt connection
 struct infb_interrupt_factory : public infb_conn_factory {
     infb_conn* make_conn();
+    void destroy_conn(infb_conn*);
 
     infb_interrupt_factory(infb_provider* p) : infb_conn_factory(p) {
     }
@@ -221,12 +225,16 @@ struct infb_interrupt_factory : public infb_conn_factory {
 };
 
 struct infb_conn {
-    infb_conn(bool blocking, infb_provider* p, ibv_comp_channel* schan, 
+    infb_conn(infb_conn_factory* f, bool blocking, infb_provider* p, ibv_comp_channel* schan, 
 	      ibv_comp_channel* rchan, void* cqctx) 
-	: p_(p), blocking_(blocking), cqctx_(cqctx), schan_(schan), rchan_(rchan) {
+	: f_(f), p_(p), blocking_(blocking), cqctx_(cqctx), schan_(schan), rchan_(rchan) {
+	pd_ = NULL;
+	mr_ = NULL;
+	scq_ = rcq_ = NULL;
+	qp_ = NULL;
     }
-    infb_conn(bool blocking, infb_provider* p, ibv_comp_channel* schan,
-	      ibv_comp_channel* rchan) : infb_conn(blocking, p, schan, rchan, this) {
+    infb_conn(infb_conn_factory* f, bool blocking, infb_provider* p, ibv_comp_channel* schan,
+	      ibv_comp_channel* rchan) : infb_conn(f, blocking, p, schan, rchan, this) {
     }
 
     ibv_cq* create_cq(ibv_comp_channel* chan, int depth) {
@@ -310,6 +318,24 @@ struct infb_conn {
 	printf("max_inline_size: %zd\n", max_inline_size_);
 	return 0;
     }
+
+    ~infb_conn() {
+	printf("~infb_conn\n");
+	if (qp_)
+	    CHECK(ibv_destroy_qp(qp_) == 0);
+	if (mr_)
+	    CHECK(ibv_dereg_mr(mr_) == 0);
+	if (pd_)
+	    CHECK(ibv_dealloc_pd(pd_) == 0);
+	if (scq_)
+	    CHECK(ibv_destroy_cq(scq_) == 0);
+	if (rcq_)
+	    CHECK(ibv_destroy_cq(rcq_) == 0);
+	if (buf_.s_)
+	    free(buf_.s_);
+	f_->destroy_conn(this);
+    }
+
     ssize_t read(char* buf, size_t len) {
 	assert(len > 0);
 	if (!readable()) {
@@ -438,6 +464,12 @@ struct infb_conn {
     void* cqctx() {
 	return cqctx_;
     }
+    ibv_comp_channel* rchan() {
+	return rchan_;
+    }
+    ibv_comp_channel* schan() {
+	return schan_;
+    }
 
   private:
     void wait_channel(ibv_comp_channel* chan, ibv_cq* cq) {
@@ -560,6 +592,7 @@ struct infb_conn {
 	list.lkey = lkey;
     }
 
+    infb_conn_factory* f_;
     infb_provider* p_;
     ibv_pd* pd_;
     ibv_mr* mr_;
@@ -595,18 +628,14 @@ struct infb_loop : public infb_conn_factory {
     }
     infb_conn* make_conn() {
 	infb_ev_watcher* w = new infb_ev_watcher();
-	infb_conn* c = new infb_conn(false, p_, c_, c_, w);
+	infb_conn* c = new infb_conn(this, false, p_, c_, c_, w);
 	c->create();
 	w->c_ = c;
 	wch_.push_back(w);
 	return c;
     }
-    infb_ev_watcher* ev_watcher(infb_conn* c) {
-	void* cqctx = c->cqctx();
-	assert(cqctx != c);
-	return reinterpret_cast<infb_ev_watcher*>(cqctx);
-    }
-    void destroy(infb_ev_watcher* w) {
+    void destroy_conn(infb_conn* c) {
+	infb_ev_watcher* w = ev_watcher(c);
 	for (auto it = wch_.begin(); it != wch_.end(); it++)
 	    if (*it == w) {
 		deletion_ = true;
@@ -614,6 +643,11 @@ struct infb_loop : public infb_conn_factory {
 		return;
 	    }
 	assert(0);
+    }
+    infb_ev_watcher* ev_watcher(infb_conn* c) {
+	void* cqctx = c->cqctx();
+	assert(cqctx != c);
+	return reinterpret_cast<infb_ev_watcher*>(cqctx);
     }
 
     void loop_once() {
@@ -711,9 +745,12 @@ struct infb_client {
 };
 
 infb_conn* infb_poll_factory::make_conn() {
-    infb_conn* c = new infb_conn(true, p_, NULL, NULL);
+    infb_conn* c = new infb_conn(this, true, p_, NULL, NULL);
     c->create();
     return c;
+}
+
+void infb_poll_factory::destroy_conn(infb_conn*) {
 }
 
 infb_conn* infb_interrupt_factory::make_conn() {
@@ -721,7 +758,14 @@ infb_conn* infb_interrupt_factory::make_conn() {
     ibv_comp_channel* schan;
     CHECK(rchan = ibv_create_comp_channel(p_->context()));
     CHECK(schan = ibv_create_comp_channel(p_->context()));
-    infb_conn* c = new infb_conn(true, p_, schan, rchan);
+    infb_conn* c = new infb_conn(this, true, p_, schan, rchan);
     c->create();
     return c;
+}
+
+void infb_interrupt_factory::destroy_conn(infb_conn* c) {
+    ibv_comp_channel* rchan = c->rchan();
+    ibv_comp_channel* schan = c->schan();
+    CHECK(ibv_destroy_comp_channel(rchan) == 0);
+    CHECK(ibv_destroy_comp_channel(schan) == 0);
 }

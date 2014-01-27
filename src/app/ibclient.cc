@@ -19,6 +19,7 @@ static void read(infb_conn* c) {
         double t = rpc::common::now() - t0;
         fprintf(stderr, "completed %d iterations in %.2f seconds, latency %.1f us\n",
     	        iters, t, t * 1000000 / iters);
+	delete c;
         exit(0);
     }
 }
