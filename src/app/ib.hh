@@ -183,6 +183,12 @@ struct infb_poll_factory : public infb_conn_factory {
     infb_conn* make_conn();
     infb_poll_factory(infb_provider* p) : infb_conn_factory(p) {
     }
+    static infb_poll_factory* default_instance() {
+	static infb_poll_factory* instance;
+	if (!instance)
+	    instance = new infb_poll_factory(infb_provider::default_instance());
+	return instance;
+    }
 };
 
 // blocking interrupt connection
@@ -190,6 +196,12 @@ struct infb_interrupt_factory : public infb_conn_factory {
     infb_conn* make_conn();
 
     infb_interrupt_factory(infb_provider* p) : infb_conn_factory(p) {
+    }
+    static infb_interrupt_factory* default_instance() {
+	static infb_interrupt_factory* instance;
+	if (!instance)
+	    instance = new infb_interrupt_factory(infb_provider::default_instance());
+	return instance;
     }
 };
 

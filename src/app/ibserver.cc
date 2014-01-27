@@ -40,9 +40,9 @@ int main(int argc, char* argv[]) {
     if (type == "poll" || type == "int") {
 	infb_conn_factory* f;
 	if (type == "poll")
-	    f = new infb_poll_factory(infb_provider::default_instance());
+	    f = infb_poll_factory::default_instance();
 	else
-	    f = new infb_interrupt_factory(infb_provider::default_instance());
+	    f = infb_interrupt_factory::default_instance();
 	infb_conn* c = s.accept(f);
 	while (true) {
 	    read(c);
