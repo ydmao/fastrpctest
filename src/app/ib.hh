@@ -371,7 +371,7 @@ struct infb_conn {
 	return !pending_read_.empty();
     }
     bool writable() const {
-	return wbuf_.length();
+	return nw_ != tx_depth_;
     }
     void* cqctx() {
 	return cqctx_;
@@ -584,8 +584,10 @@ struct infb_loop : public infb_conn_factory {
 	CHECK(ibv_req_notify_cq(cq, 0) == 0);
 
 	infb_ev_watcher* w = reinterpret_cast<infb_ev_watcher*>(ctx);
-	bool r = w->conn()->read_cq(cq);
-	w->operator()(r ? INFB_EV_READ : INFB_EV_WRITE);
+	infb_conn* c = w->conn();
+	int flags = c->readable() ? INFB_EV_READ : 0;
+	flags |= c->writable() ? INFB_EV_WRITE : 0;
+	w->operator()(flags | (w->conn()->read_cq(cq) ? INFB_EV_READ : INFB_EV_WRITE));
     }
     infb_provider* provider() {
 	return p_;
