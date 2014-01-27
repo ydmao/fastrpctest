@@ -1,61 +1,66 @@
 #include "ib.hh"
 #include <string>
+#include "rpc/libev_loop.hh"
 
 struct client {
     static constexpr size_t size = 4096;
     char b[size];
     int nr_;
-    client() : nr_(0) {
+    client(infb_conn* c) : nr_(0), c_(c) {
     }
-    void read(infb_conn* c) {
-        c->read(b, sizeof(b));
+    void read() {
+        ssize_t r = c_->read(b, sizeof(b));
+	if (r < 0) {
+	    perror("client::read");
+	    c_->eselect(0);
+	    return;
+	}
+	if (r != sizeof(b)) {
+	    perror("client::read");
+	    fprintf(stderr, "expected %zd, got %zd\n", sizeof(b), r);
+	    assert(0);
+	}
         char eb[size];
         sprintf(eb, "c_%d", nr_++);
         assert(strcmp(eb, b) == 0);
     }
-    void event_handler(infb_ev_watcher* w, int flags) {
-        if (flags & INFB_EV_READ)
-	    read(w->conn());
+    void event_handler(infb_conn* c, int flags) {
+        if (flags & ev::READ)
+	    read();
     }
+  private:
+    infb_conn* c_;
 };
 
 int main(int argc, char* argv[]) {
-    std::string type("async");
+    infb_conn_type type = INFB_CONN_ASYNC;
     if (argc > 1)
-	type.assign(argv[1]);
+	type = make_infb_type(argv[1]);
 
     infb_server s;
     s.listen(8181);
 
-    if (type == "poll" || type == "int") {
-	infb_conn_factory* f;
-	if (type == "poll")
-	    f = infb_poll_factory::default_instance();
-	else
-	    f = infb_interrupt_factory::default_instance();
-	infb_conn* c = s.accept(f);
-	client clt;
-	while (true)
-	    clt.read(c);
-    } else if (type == "async") {
-	while (true) {
-            infb_loop* loop = infb_loop::make(infb_provider::default_instance());
-	    infb_conn* c = s.accept(loop);
+    while (true) {
+        infb_conn* c = s.accept(type);
+        client* clt = new client(c);
+        if (type != INFB_CONN_ASYNC) {
+	    while (true)
+	        clt->read();
+        } else  {
 	    std::thread t([=]{
-                    infb_ev_watcher* w = loop->ev_watcher(c);
-	   	    client* clt = new client;
+		    rpc::nn_loop* loop = rpc::nn_loop::get_tls_loop();
 	            using std::placeholders::_1;
 	            using std::placeholders::_2;
-                    w->set(std::bind(&client::event_handler, clt, _1, _2));
-                    w->set(INFB_EV_READ);
-                    while (true)
-	                loop->loop_once();
+		    c->register_loop(loop->ev_loop(), std::bind(&client::event_handler, clt, _1, _2), ev::READ);
+		    loop->enter();
+                    while (true) {
+			c->drain();
+	                loop->run_once();
+		    }
+		    loop->leave();
 	        });
   	    t.detach();
 	}
-    } else {
-	fprintf(stderr, "Unknown connection type %s\n", type.c_str());
-	fprintf(stderr, "Usage: %s poll|int|async\n", argv[0]);
     }
     return 0;
 }

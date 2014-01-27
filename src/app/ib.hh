@@ -13,6 +13,8 @@
 #include <queue>
 #include <thread>
 #include <stdarg.h>
+#include <mutex>
+#include <ev++.h>
 
 #include "rpc_common/sock_helper.hh"
 #include "compiler/str.hh"
@@ -48,41 +50,6 @@ inline A round_up(A a, B b) {
     return (a % b) ? (a / b * b + b) : a;
 }
 
-enum { INFB_EV_READ = 0x1, INFB_EV_WRITE = 0x2 };
-
-struct infb_ev_watcher {
-    typedef std::function<void(infb_ev_watcher*, int)> cb_type;
-
-    infb_ev_watcher(infb_conn* c) : flags_(0), c_(c) {}
-    virtual ~infb_ev_watcher() {}
-
-    void set(int flags) {
-	assert(flags);
-	flags_ = flags;
-    }
-    bool operator()(int flags) {
-	int interest = flags & flags_;
-	if (cb_ && interest) {
-	    dbg("infb_ev_watcher::(): dispatch %d\n", interest);
-	    cb_(this, interest);
-	}
-	return interest;
-    }
-    void set(cb_type cb) {
-	cb_ = cb;
-    }
-    infb_conn* conn() {
-	return c_;
-    }
-  protected:
-    friend struct infb_loop;
-    infb_ev_watcher() : flags_(0), c_(NULL) {}
-
-    int flags_;
-    cb_type cb_;
-    infb_conn* c_;
-};
-
 struct infb_sockaddr {
     uint16_t lid_;
     uint32_t qpn_;
@@ -110,18 +77,6 @@ struct infb_sockaddr {
     }
 };
 
-struct infb_provider;
-
-struct infb_conn_factory {
-    infb_conn_factory(infb_provider* p) : p_(p) {}
-    virtual ~infb_conn_factory() {}
-    virtual infb_conn* make_conn() = 0;
-  protected:
-    friend class infb_conn;
-    virtual void destroy_conn(infb_conn* conn) = 0;
-    infb_provider* p_;
-};
-
 struct infb_provider {
     static infb_provider* make(const char* dname, int ib_port, int sl) {
         ibv_device** dl = ibv_get_device_list(NULL);
@@ -143,8 +98,12 @@ struct infb_provider {
     }
     static infb_provider* default_instance() {
 	static infb_provider* instance = NULL;
-	if (!instance)
-	    instance = make(NULL, 1, 0);
+	static std::mutex mu;
+	if (!instance) {
+	    std::lock_guard<std::mutex> lk(mu);
+	    if (!instance)
+	        instance = make(NULL, 1, 0);
+	}
 	return instance;
     }
     ibv_device* device() {
@@ -195,57 +154,34 @@ struct infb_provider {
     ibv_device_attr attr_;
 };
 
-// blocking poll socket
-struct infb_poll_factory : public infb_conn_factory {
-    infb_conn* make_conn();
-    void destroy_conn(infb_conn*);
-    infb_poll_factory(infb_provider* p) : infb_conn_factory(p) {
-    }
-    static infb_poll_factory* default_instance() {
-	static infb_poll_factory* instance;
-	if (!instance)
-	    instance = new infb_poll_factory(infb_provider::default_instance());
-	return instance;
-    }
-};
+enum infb_conn_type { INFB_CONN_POLL, INFB_CONN_INT, INFB_CONN_ASYNC };
 
-// blocking interrupt connection
-struct infb_interrupt_factory : public infb_conn_factory {
-    infb_conn* make_conn();
-    void destroy_conn(infb_conn*);
-
-    infb_interrupt_factory(infb_provider* p) : infb_conn_factory(p) {
+inline infb_conn_type make_infb_type(const char* type) {
+    if (strcmp(type, "poll") == 0)
+	return INFB_CONN_POLL;
+    else if (strcmp(type, "int") == 0)
+	return INFB_CONN_INT;
+    else if (strcmp(type, "async") == 0)
+	return INFB_CONN_ASYNC;
+    else {
+	fprintf(stderr, "bad infiniband type %s\n", type);
+	assert(0);
     }
-    static infb_interrupt_factory* default_instance() {
-	static infb_interrupt_factory* instance;
-	if (!instance)
-	    instance = new infb_interrupt_factory(infb_provider::default_instance());
-	return instance;
-    }
-};
+}
 
 struct infb_conn {
-    infb_conn(infb_conn_factory* f, bool blocking, infb_provider* p, ibv_comp_channel* schan, 
-	      ibv_comp_channel* rchan, void* cqctx) 
-	: f_(f), p_(p), blocking_(blocking), cqctx_(cqctx), schan_(schan), rchan_(rchan) {
+    infb_conn(infb_conn_type type, infb_provider* p) 
+	: p_(p), type_(type) {
 	pd_ = NULL;
 	mr_ = NULL;
 	scq_ = rcq_ = NULL;
 	qp_ = NULL;
-    }
-    infb_conn(infb_conn_factory* f, bool blocking, infb_provider* p, ibv_comp_channel* schan,
-	      ibv_comp_channel* rchan) : infb_conn(f, blocking, p, schan, rchan, this) {
+	schan_ = rchan_ = NULL;
+	sw_ = NULL;
     }
 
-    ibv_cq* create_cq(ibv_comp_channel* chan, int depth) {
-	ibv_cq* cq = NULL;
-	CHECK(cq = ibv_create_cq(p_->context(), depth, cqctx_, chan, 0));
-        // when a completion queue entry (CQE) is placed on the CQ,
-        // send a completion event to schan_/rchan_ if the channel is empty.
-        // mimics the level-trigger file descriptors
-        if (chan)
-	    CHECK(ibv_req_notify_cq(cq, 0) == 0);
-	return cq;
+    bool blocking() const {
+	return type_ != INFB_CONN_ASYNC;
     }
 
     int create() {
@@ -256,6 +192,13 @@ struct infb_conn {
 	//mtu_ = IBV_MTU_2048;
 	mtub_ = 128 << mtu_;
 	// XXX: decide mr size dynamically
+	if (type_ != INFB_CONN_POLL) {
+	    CHECK(rchan_ = ibv_create_comp_channel(p_->context()));
+	    if (blocking()) {
+	        CHECK(schan_ = ibv_create_comp_channel(p_->context()));
+	    } else
+		schan_ = rchan_;
+	}
 	rcq_ = create_cq(rchan_, 600);
 	scq_ = create_cq(schan_, 40);
 	if (geteuid() != 0) {
@@ -333,13 +276,20 @@ struct infb_conn {
 	    CHECK(ibv_destroy_cq(rcq_) == 0);
 	if (buf_.s_)
 	    free(buf_.s_);
-	f_->destroy_conn(this);
+	if (rchan_)
+	    CHECK(ibv_destroy_comp_channel(rchan_) == 0);
+	if (schan_ != rchan_)
+	    CHECK(ibv_destroy_comp_channel(schan_) == 0);
+	if (sw_) {
+	    sw_->stop();
+	    delete sw_;
+	}
     }
 
     ssize_t read(char* buf, size_t len) {
 	assert(len > 0);
 	if (!readable()) {
-	    if (!blocking_) {
+	    if (!blocking()) {
 	        errno = EWOULDBLOCK;
 	        return -1;
 	    }
@@ -367,7 +317,7 @@ struct infb_conn {
     ssize_t write(const char* buf, size_t len) {
 	assert(len > 0);
 	if (!writable(len)) {
-	    if (!blocking_) {
+	    if (!blocking()) {
 	        errno = EWOULDBLOCK;
 	        return -1;
 	    }
@@ -461,27 +411,68 @@ struct infb_conn {
     bool writable(size_t len = 0) const {
 	return nw_ < scq_->cqe && ((len > 0 && len < max_inline_size_) || wbuf_.length());
     }
-    void* cqctx() {
-	return cqctx_;
+
+    void drain() {
+	assert(!blocking() && sw_);
+	if (flags_ == 0)
+	    return;
+   	dbg("drain: dispatch before querying for CQE\n");
+	while (true) {
+	    int flags = readable() ? ev::READ : 0;
+	    flags |= writable() ? ev::WRITE : 0;
+	    int interest = flags & flags_;
+	    if (!interest)
+		break;
+	    cb_(this, interest);
+	}
     }
-    ibv_comp_channel* rchan() {
-	return rchan_;
+
+    void poll_channel(ev::io& w, int) {
+	ibv_cq* cq = wait_channel(schan_);
+	if (cq == scq_)
+	    real_write();
+	else
+	    real_read();
     }
-    ibv_comp_channel* schan() {
-	return schan_;
+
+    typedef std::function<void(infb_conn*,int)> callback_type;
+    void register_loop(ev::loop_ref loop, callback_type cb, int flags) {
+	assert(!blocking() && schan_ == rchan_);
+	cb_ = cb;
+	sw_ = new ev::io(loop);
+	sw_->set<infb_conn, &infb_conn::poll_channel>(this);
+	rpc::common::sock_helper::make_nonblock(schan_->fd);
+	sw_->set(schan_->fd, ev::READ);
+
+	hard_select(flags);
+    }
+    void eselect(int flags) {
+	assert(!blocking());
+	if (flags_ == flags)
+	    return;
+	hard_select(flags);
     }
 
   private:
-    void wait_channel(ibv_comp_channel* chan, ibv_cq* cq) {
-	if (!chan)
-	    return;
-        ibv_cq* xcq;
+    void hard_select(int flags) {
+	if (flags)
+	    sw_->start();
+	else
+	    sw_->stop();
+	flags_ = flags;
+    }
+
+    ibv_cq* wait_channel(ibv_comp_channel* chan) {
+        ibv_cq* cq;
 	void* ctx;
-	CHECK(ibv_get_cq_event(chan, &xcq, &ctx) == 0);
-	CHECK(xcq == cq);
-	CHECK(ctx == cqctx_);
+	if (ibv_get_cq_event(chan, &cq, &ctx)) {
+	    perror("ibv_get_cq_event");
+	    return NULL;
+	}
+	CHECK(ctx == this);
 	ibv_ack_cq_events(cq, 1);
 	CHECK(ibv_req_notify_cq(cq, 0) == 0);
+	return cq;
     }
 
     template <typename F>
@@ -490,7 +481,7 @@ struct infb_conn {
 	int ne;
 	do {
 	    CHECK((ne = ibv_poll_cq(cq, cq->cqe, wc)) >= 0);
-	} while (blocking_ && ne < 1);
+	} while (blocking() && ne < 1);
 	for (int i = 0; i < ne; ++i) {
 	    if (wc[i].status != IBV_WC_SUCCESS) {
 		fprintf(stderr, "poll failed with status: %d\n", wc[i].status);
@@ -500,10 +491,9 @@ struct infb_conn {
 	}
 	return 0;
     }
-  public:
     int real_read() {
-	if (blocking_)
-	    wait_channel(rchan_, rcq_);
+	if (type_ == INFB_CONN_INT)
+	    assert(wait_channel(rchan_) == rcq_);
 	auto f = [&](const ibv_wc& wc) {
 	   	assert(recv_request(wc.wr_id));
 		pending_read_.push(refcomp::str((const char*)wc.wr_id, wc.byte_len));
@@ -511,8 +501,8 @@ struct infb_conn {
 	return poll(rcq_, f);
     }
     int real_write() {
-	if (blocking_)
-	    wait_channel(schan_, scq_);
+	if (type_ == INFB_CONN_INT)
+	    assert(wait_channel(schan_) == scq_);
 	auto f = [&](const ibv_wc& wc) {
 	        if (non_inline_send_request(wc.wr_id))
 	            wbuf_extend(wc.byte_len);
@@ -520,7 +510,18 @@ struct infb_conn {
 	    };
 	return poll(scq_, f);
     }
-  private:
+
+    ibv_cq* create_cq(ibv_comp_channel* chan, int depth) {
+	ibv_cq* cq = NULL;
+	CHECK(cq = ibv_create_cq(p_->context(), depth, this, chan, 0));
+        // when a completion queue entry (CQE) is placed on the CQ,
+        // send a completion event to schan_/rchan_ if the channel is empty.
+        // mimics the level-trigger file descriptors
+        if (chan)
+	    CHECK(ibv_req_notify_cq(cq, 0) == 0);
+	return cq;
+    }
+
     char* wbuf_start() {
 	return buf_.s_ + rcq_->cqe * mtub_;
     }
@@ -592,7 +593,7 @@ struct infb_conn {
 	list.lkey = lkey;
     }
 
-    infb_conn_factory* f_;
+    const infb_conn_type type_;
     infb_provider* p_;
     ibv_pd* pd_;
     ibv_mr* mr_;
@@ -610,91 +611,15 @@ struct infb_conn {
     infb_sockaddr local_;
     infb_sockaddr remote_;
 
-    bool blocking_;
-
     std::queue<refcomp::str> pending_read_; // available read scatter list
     refcomp::str wbuf_; // available write buffer
     int nw_; // number of outstanding writes
-    void* cqctx_;
-    ibv_comp_channel* schan_;
-    ibv_comp_channel* rchan_;
-};
+    ibv_comp_channel* schan_; // send channel
+    ibv_comp_channel* rchan_; // receive channel
 
-struct infb_loop : public infb_conn_factory {
-    static infb_loop* make(infb_provider* p) {
-	ibv_comp_channel* c = NULL;
-	CHECK(c = ibv_create_comp_channel(p->context()));
-        return new infb_loop(p, c);
-    }
-    infb_conn* make_conn() {
-	infb_ev_watcher* w = new infb_ev_watcher();
-	infb_conn* c = new infb_conn(this, false, p_, c_, c_, w);
-	c->create();
-	w->c_ = c;
-	wch_.push_back(w);
-	return c;
-    }
-    void destroy_conn(infb_conn* c) {
-	infb_ev_watcher* w = ev_watcher(c);
-	for (auto it = wch_.begin(); it != wch_.end(); it++)
-	    if (*it == w) {
-		deletion_ = true;
-		wch_.erase(it);
-		return;
-	    }
-	assert(0);
-    }
-    infb_ev_watcher* ev_watcher(infb_conn* c) {
-	void* cqctx = c->cqctx();
-	assert(cqctx != c);
-	return reinterpret_cast<infb_ev_watcher*>(cqctx);
-    }
-
-    void loop_once() {
-	deletion_ = false;
-	for (int i = 0; i < (int)wch_.size(); ++i) {
-	    int flags = wch_[i]->conn()->readable() ? INFB_EV_READ : 0;
-	    flags |= wch_[i]->conn()->writable() ? INFB_EV_WRITE : 0;
-   	    dbg("loop_once: dispatch before querying for CQE\n");
-	    wch_[i]->operator()(flags);
-	    if (unlikely(deletion_)) {
-		deletion_ = false;
-		--i;
-	    }
-	}
-	if (!wch_.size())
-	    return;
-	dbg("loop_once: wait for CQE\n");
-	ibv_cq* cq;
-	void* ctx;
-	CHECK(ibv_get_cq_event(c_, &cq, &ctx) == 0);
-	CHECK(ctx != NULL);
-	ibv_ack_cq_events(cq, 1);
-	CHECK(ibv_req_notify_cq(cq, 0) == 0);
-	dbg("loop_once: got CQE\n");
-
-	// It is possible that we have already processed the CQ
-	// corresponding to this CQE. As a result, we only dispatch
-	// watcher if the connection is truly readable/writable.
-	infb_ev_watcher* w = reinterpret_cast<infb_ev_watcher*>(ctx);
-	infb_conn* c = w->conn();
-	if (c->read_cq(cq))
-	    c->real_read();
-	else
-	    c->real_write();
-	int flags = c->readable() ? INFB_EV_READ : 0;
-	flags |= c->writable() ? INFB_EV_WRITE : 0;
-	w->operator()(flags);
-    }
-    infb_provider* provider() {
-	return p_;
-    }
-  private:
-    infb_loop(infb_provider* p, ibv_comp_channel* c) : infb_conn_factory(p), c_(c) {
-    }
-    ibv_comp_channel* c_;
-    std::vector<infb_ev_watcher*> wch_;
-    bool deletion_;
+    ev::io* sw_; // watcher on the channel (schan_ == rchan_)
+    callback_type cb_;
+    int flags_;
 };
 
 struct infb_server {
@@ -704,8 +629,9 @@ struct infb_server {
         sfd_ = rpc::common::sock_helper::listen(port);
         assert(sfd_ >= 0);
     }
-    infb_conn* accept(infb_conn_factory* f) {
-	infb_conn* c = f->make_conn();
+    infb_conn* accept(infb_conn_type type) {
+	infb_conn* c = new infb_conn(type, infb_provider::default_instance());
+	c->create();
 	c->local_address().dump(stdout);
 
         int fd = rpc::common::sock_helper::accept(sfd_);
@@ -726,8 +652,9 @@ struct infb_server {
 };
 
 struct infb_client {
-    static infb_conn* connect(const char* ip, int port, infb_conn_factory* f) {
-	infb_conn* c = f->make_conn();
+    static infb_conn* connect(const char* ip, int port, infb_conn_type type) {
+	infb_conn* c = new infb_conn(type, infb_provider::default_instance());
+	c->create();
 	c->local_address().dump(stdout);
 
         int fd = rpc::common::sock_helper::connect(ip, port);
@@ -744,28 +671,4 @@ struct infb_client {
     }
 };
 
-infb_conn* infb_poll_factory::make_conn() {
-    infb_conn* c = new infb_conn(this, true, p_, NULL, NULL);
-    c->create();
-    return c;
-}
 
-void infb_poll_factory::destroy_conn(infb_conn*) {
-}
-
-infb_conn* infb_interrupt_factory::make_conn() {
-    ibv_comp_channel* rchan;
-    ibv_comp_channel* schan;
-    CHECK(rchan = ibv_create_comp_channel(p_->context()));
-    CHECK(schan = ibv_create_comp_channel(p_->context()));
-    infb_conn* c = new infb_conn(this, true, p_, schan, rchan);
-    c->create();
-    return c;
-}
-
-void infb_interrupt_factory::destroy_conn(infb_conn* c) {
-    ibv_comp_channel* rchan = c->rchan();
-    ibv_comp_channel* schan = c->schan();
-    CHECK(ibv_destroy_comp_channel(rchan) == 0);
-    CHECK(ibv_destroy_comp_channel(schan) == 0);
-}
