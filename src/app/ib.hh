@@ -213,31 +213,29 @@ struct infb_conn {
 	// get port attributes
 	CHECK(ibv_query_port(p_->context(), p_->ib_port(), &portattr_) == 0);
 	mtu_ = portattr_.active_mtu;
-	//mtu_ = IBV_MTU_4096;
+	//mtu_ = IBV_MTU_2048;
 	mtub_ = 128 << mtu_;
-        tx_depth_ = 4;
-	rx_depth_ = 4;
+	rcq_ = create_cq(rchan_, 4);
+	scq_ = create_cq(schan_, 3);
+	printf("actual rx_depth %d, tx_depth %d\n", rcq_->cqe, scq_->cqe);
 
 	CHECK(pd_ = ibv_alloc_pd(p_->context()));
 
 	// create and register memory region of size_ bytes
 	const int page_size = sysconf(_SC_PAGESIZE);
-	buf_.len_ = round_up(mtub_ * (rx_depth_ + tx_depth_), page_size);
+	buf_.len_ = round_up(mtub_ * (rcq_->cqe + scq_->cqe), page_size);
 	printf("allocating %d bytes\n", buf_.len_);
 	CHECK(buf_.s_ = (char*)memalign(page_size, buf_.len_));
 	bzero(buf_.s_, buf_.len_);
 	CHECK(mr_ = ibv_reg_mr(pd_, buf_.s_, buf_.len_, IBV_ACCESS_LOCAL_WRITE));
-	
-	rcq_ = create_cq(rchan_, rx_depth_);
-	scq_ = create_cq(schan_, tx_depth_);
 
 	// create a RC queue pair
 	ibv_qp_init_attr attr;
 	bzero(&attr, sizeof(attr));
 	attr.send_cq = scq_;
 	attr.recv_cq = rcq_;
-	attr.cap.max_send_wr = tx_depth_;
-	attr.cap.max_recv_wr = rx_depth_;
+	attr.cap.max_send_wr = scq_->cqe;
+	attr.cap.max_recv_wr = rcq_->cqe;
 	attr.cap.max_send_sge = 1;
 	attr.cap.max_recv_sge = 1;
 	attr.cap.max_inline_data = max_inline_data;
@@ -256,7 +254,7 @@ struct infb_conn {
 			    IBV_QP_PKEY_INDEX   |
 			    IBV_QP_PORT  	| 
 			    IBV_QP_ACCESS_FLAGS) == 0);
-	for (int i = 0; i < rx_depth_; ++i)
+	for (int i = 0; i < rcq_->cqe; ++i)
 	    CHECK(post_recv_with_id(buf_.s_ + mtub_ * i, mtub_) == 0);
 
 	// if the link layer is Ethernet, portattr_.lid is not important;
@@ -264,7 +262,7 @@ struct infb_conn {
 	CHECK(portattr_.link_layer == IBV_LINK_LAYER_ETHERNET || portattr_.lid);
 	// XXX: support user specified gid_index
 	local_.make(portattr_.lid, qp_->qp_num, 0, NULL);
-	wbuf_.assign(wbuf_start(), tx_depth_ * mtub_);
+	wbuf_.assign(wbuf_start(), scq_->cqe * mtub_);
 	nw_ = 0;
 
 	bzero(&attr, sizeof(attr));
@@ -388,14 +386,14 @@ struct infb_conn {
 	return !pending_read_.empty();
     }
     bool writable() const {
-	return nw_ < tx_depth_;
+	return nw_ < scq_->cqe;
     }
     void* cqctx() {
 	return cqctx_;
     }
 
   private:
-    void wait_channel(ibv_comp_channel* chan, ibv_cq* cq, int depth) {
+    void wait_channel(ibv_comp_channel* chan, ibv_cq* cq) {
 	if (!chan)
 	    return;
         ibv_cq* xcq;
@@ -408,11 +406,11 @@ struct infb_conn {
     }
 
     template <typename F>
-    int poll(ibv_cq* cq, int depth, F f) {
-	ibv_wc wc[depth];
+    int poll(ibv_cq* cq, F f) {
+	ibv_wc wc[cq->cqe];
 	int ne;
 	do {
-	    CHECK((ne = ibv_poll_cq(cq, depth, wc)) >= 0);
+	    CHECK((ne = ibv_poll_cq(cq, cq->cqe, wc)) >= 0);
 	} while (blocking_ && ne < 1);
 	for (int i = 0; i < ne; ++i) {
 	    if (wc[i].status != IBV_WC_SUCCESS) {
@@ -426,29 +424,29 @@ struct infb_conn {
 
     int real_read() {
 	if (blocking_)
-	    wait_channel(rchan_, rcq_, rx_depth_);
+	    wait_channel(rchan_, rcq_);
 	auto f = [&](const ibv_wc& wc) {
 	   	assert(recv_request(wc.wr_id));
 		pending_read_.push(refcomp::str((const char*)wc.wr_id, wc.byte_len));
 	    };
-	return poll(rcq_, rx_depth_, f);
+	return poll(rcq_, f);
     }
     int real_write() {
 	if (blocking_)
-	    wait_channel(schan_, scq_, tx_depth_);
+	    wait_channel(schan_, scq_);
 	auto f = [&](const ibv_wc& wc) {
 	        if (non_inline_send_request(wc.wr_id))
 	            wbuf_extend(uintptr_t(wc.wr_id));
 		--nw_;
 	    };
-	return poll(scq_, tx_depth_, f);
+	return poll(scq_, f);
     }
 
     char* wbuf_start() {
-	return buf_.s_ + rx_depth_ * mtub_;
+	return buf_.s_ + rcq_->cqe * mtub_;
     }
     char* wbuf_end() {
-	return buf_.s_ + (rx_depth_ + tx_depth_) * mtub_;
+	return buf_.s_ + (rcq_->cqe + scq_->cqe) * mtub_;
     }
     void wbuf_consume() {
 	wbuf_.s_ += mtub_;
@@ -525,8 +523,6 @@ struct infb_conn {
 
     refcomp::str buf_; // the single read/write buffer
 
-    int rx_depth_;
-    int tx_depth_;
     ibv_mtu mtu_;
     size_t mtub_; // mtu in bytes
     size_t max_inline_size_;
