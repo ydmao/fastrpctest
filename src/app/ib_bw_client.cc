@@ -9,9 +9,10 @@ static void write(infb_conn* c) {
     static int iters = 0;
     if (iters == 0)
 	t0 = rpc::common::now();
-    sprintf(b, "c_%d", iters++);
-    assert(c->write(b, sizeof(b)) == sizeof(b));
-    if (iters == 400000) {
+    do {
+        sprintf(b, "c_%d", iters++);
+    } while (c->write(b, sizeof(b)) == sizeof(b));
+    if (iters >= 400000) {
         double t = rpc::common::now() - t0;
         fprintf(stderr, "completed %d iterations in %.2f seconds, bw %.1f Mbps\n",
     	        iters, t, iters * size * 8 / t / (1<<20));
