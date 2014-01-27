@@ -254,13 +254,14 @@ struct infb_conn {
 	return 0;
     }
     ssize_t read(char* buf, size_t len) {
+	assert(len > 0);
 	if (!readable())
 	    real_read();
+
 	if (!readable()) {
 	    errno = EWOULDBLOCK;
 	    return -1;
 	}
-	assert(len > 0);
 	size_t r = 0;
 	while (r < len && !pending_read_.empty()) {
 	    refcomp::str& rx = pending_read_.front();
@@ -269,7 +270,7 @@ struct infb_conn {
 	    r += n;
 	    if (n == rx.length()) {
 		pending_read_.pop();
-		post_recv_with_id((char*)round_down(uintptr_t(rx.s_), mtub_), mtub_);
+		post_recv_with_id((char*)round_down(uintptr_t(rx.data()), mtub_), mtub_);
 	    } else
 		rx.assign(rx.data() + n, rx.length() - n);
 	}
@@ -277,6 +278,7 @@ struct infb_conn {
     }
 
     ssize_t write(const char* buf, size_t len) {
+	assert(len > 0);
 	if (!writable())
 	    real_write();
 
