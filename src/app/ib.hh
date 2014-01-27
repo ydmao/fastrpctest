@@ -293,12 +293,16 @@ struct infb_conn {
     }
     ssize_t read(char* buf, size_t len) {
 	assert(len > 0);
-	if (!readable() || !blocking_)
-	    real_read();
-
 	if (!readable()) {
-	    errno = EWOULDBLOCK;
-	    return -1;
+	    if (!blocking_) {
+	        errno = EWOULDBLOCK;
+	        return -1;
+	    }
+	    real_read(); // must have made some progress
+	    if (!readable()) {
+		errno = EIO;
+	        return -1;
+	    }
 	}
 	size_t r = 0;
 	while (r < len && !pending_read_.empty()) {
@@ -317,13 +321,18 @@ struct infb_conn {
 
     ssize_t write(const char* buf, size_t len) {
 	assert(len > 0);
-	if (!writable() || !blocking_)
-	    real_write();
-
 	if (!writable()) {
-	    errno = EWOULDBLOCK;
-	    return -1;
+	    if (!blocking_) {
+	        errno = EWOULDBLOCK;
+	        return -1;
+	    }
+	    real_write(); // must have made some progress
+	    if (!writable()) {
+		errno = EIO;
+		return -1;
+	    }
 	}
+
 	if (len <= max_inline_size_) {
 	    if (post_send_with_buffer(buf, len, IBV_SEND_SIGNALED | IBV_SEND_INLINE) == 0)
 	        return len;
@@ -340,6 +349,7 @@ struct infb_conn {
 	    wbuf_consume();
 	    r += n;
 	}
+	
 	return r;
     }
     
@@ -440,7 +450,7 @@ struct infb_conn {
 	}
 	return 0;
     }
-
+  public:
     int real_read() {
 	if (blocking_)
 	    wait_channel(rchan_, rcq_);
@@ -460,7 +470,7 @@ struct infb_conn {
 	    };
 	return poll(scq_, f);
     }
-
+  private:
     char* wbuf_start() {
 	return buf_.s_ + rcq_->cqe * mtub_;
     }
@@ -608,11 +618,18 @@ struct infb_loop : public infb_conn_factory {
 	ibv_ack_cq_events(cq, 1);
 	CHECK(ibv_req_notify_cq(cq, 0) == 0);
 
+	// It is possible that we have already processed the CQ
+	// corresponding to this CQE. As a result, we only dispatch
+	// watcher if the connection is truly readable/writable.
 	infb_ev_watcher* w = reinterpret_cast<infb_ev_watcher*>(ctx);
 	infb_conn* c = w->conn();
+	if (c->read_cq(cq))
+	    c->real_read();
+	else
+	    c->real_write();
 	int flags = c->readable() ? INFB_EV_READ : 0;
 	flags |= c->writable() ? INFB_EV_WRITE : 0;
-	w->operator()(flags | (w->conn()->read_cq(cq) ? INFB_EV_READ : INFB_EV_WRITE));
+	w->operator()(flags);
     }
     infb_provider* provider() {
 	return p_;

@@ -14,7 +14,9 @@ all: $(FASTRPC) \
      $(OBJDIR)/server \
      $(OBJDIR)/client \
      $(OBJDIR)/ibclient \
-     $(OBJDIR)/ibserver
+     $(OBJDIR)/ibserver \
+     $(OBJDIR)/ib_bw_server \
+     $(OBJDIR)/ib_bw_client
 
 $(FASTRPC): fastrpc-update
 
@@ -36,6 +38,12 @@ $(OBJDIR)/ibclient: $(OBJDIR)/ibclient.o $(FASTRPC)
 	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) -libverbs -lev -o $@
 
 $(OBJDIR)/ibserver: $(OBJDIR)/ibserver.o $(FASTRPC)
+	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) -libverbs -lev -o $@
+
+$(OBJDIR)/ib_bw_client: $(OBJDIR)/ib_bw_client.o $(FASTRPC)
+	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) -libverbs -lev -o $@
+
+$(OBJDIR)/ib_bw_server: $(OBJDIR)/ib_bw_server.o $(FASTRPC)
 	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) -libverbs -lev -o $@
 
 $(OBJDIR)/%.o: $(SRCDIR)/common/%.cc
