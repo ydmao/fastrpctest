@@ -325,13 +325,13 @@ struct infb_conn {
 
     ssize_t write(const char* buf, size_t len) {
 	assert(len > 0);
-	if (!writable()) {
+	if (!writable(len)) {
 	    if (!blocking_) {
 	        errno = EWOULDBLOCK;
 	        return -1;
 	    }
 	    real_write(); // must have made some progress
-	    if (!writable()) {
+	    if (!writable(len)) {
 		errno = EIO;
 		return -1;
 	    }
@@ -343,14 +343,13 @@ struct infb_conn {
 	    else
 		return -1;
 	}
-	assert(wbuf_.length() % mtub_ == 0);
 	ssize_t r = 0;
 	while (r < len && wbuf_.length()) {
-	    size_t n = std::min(len - r, mtub_);
+	    size_t n = std::min(len - r, wbuf_.length());
 	    memcpy(wbuf_.s_, buf + r, n);
 	    if (post_send_with_buffer(wbuf_.data(), n, IBV_SEND_SIGNALED) != 0)
 		return -1;
-	    wbuf_consume();
+	    wbuf_consume(n);
 	    r += n;
 	}
 	
@@ -418,8 +417,8 @@ struct infb_conn {
     bool readable() const {
 	return !pending_read_.empty();
     }
-    bool writable() const {
-	return nw_ < scq_->cqe;
+    bool writable(size_t len = 0) const {
+	return nw_ < scq_->cqe && ((len > 0 && len < max_inline_size_) || wbuf_.length());
     }
     void* cqctx() {
 	return cqctx_;
@@ -469,7 +468,7 @@ struct infb_conn {
 	    wait_channel(schan_, scq_);
 	auto f = [&](const ibv_wc& wc) {
 	        if (non_inline_send_request(wc.wr_id))
-	            wbuf_extend(uintptr_t(wc.wr_id));
+	            wbuf_extend(wc.byte_len);
 		--nw_;
 	    };
 	return poll(scq_, f);
@@ -481,14 +480,14 @@ struct infb_conn {
     char* wbuf_end() {
 	return buf_.s_ + (rcq_->cqe + scq_->cqe) * mtub_;
     }
-    void wbuf_consume() {
-	wbuf_.s_ += mtub_;
-	if (wbuf_.s_ == wbuf_end())
-	    wbuf_.s_ = wbuf_start();
+    void wbuf_consume(size_t n) {
+	wbuf_.s_ += n;
+	if (wbuf_.s_ >= wbuf_end())
+	    wbuf_.s_ = wbuf_start() + (wbuf_.s_ - wbuf_end());
 	wbuf_.len_ -= mtub_;
     }
-    void wbuf_extend(uint64_t wrid) {
-	wbuf_.len_ += mtub_;
+    void wbuf_extend(size_t n) {
+	wbuf_.len_ += n;
     }
 
     int post_recv_with_id(char* p, size_t len) {
