@@ -215,8 +215,8 @@ struct infb_conn {
 	mtu_ = portattr_.active_mtu;
 	//mtu_ = IBV_MTU_4096;
 	mtub_ = 128 << mtu_;
-        tx_depth_ = 1;
-	rx_depth_ = 9;
+        tx_depth_ = 4;
+	rx_depth_ = 4;
 
 	CHECK(pd_ = ibv_alloc_pd(p_->context()));
 
@@ -276,7 +276,7 @@ struct infb_conn {
     }
     ssize_t read(char* buf, size_t len) {
 	assert(len > 0);
-	if (!readable())
+	if (!readable() || !blocking_)
 	    real_read();
 
 	if (!readable()) {
@@ -300,7 +300,7 @@ struct infb_conn {
 
     ssize_t write(const char* buf, size_t len) {
 	assert(len > 0);
-	if (!writable())
+	if (!writable() || !blocking_)
 	    real_write();
 
 	if (!writable()) {
