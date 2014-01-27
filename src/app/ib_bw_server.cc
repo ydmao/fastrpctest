@@ -13,9 +13,9 @@ static void read(infb_conn* c) {
     assert(strcmp(eb, b) == 0);
 }
 
-static void process_infb_event(infb_ev_watcher* w, int flags, infb_conn* c) {
+static void process_infb_event(infb_ev_watcher* w, int flags) {
     if (flags & INFB_EV_READ)
-	read(c);
+	read(w->conn());
 }
 
 int main(int argc, char* argv[]) {

@@ -12,6 +12,7 @@ static void write(infb_conn* c) {
     do {
         sprintf(b, "c_%d", iters++);
     } while (c->write(b, sizeof(b)) == sizeof(b));
+    --iters;
     if (iters >= 400000) {
         double t = rpc::common::now() - t0;
         fprintf(stderr, "completed %d iterations in %.2f seconds, bw %.1f Mbps\n",
@@ -20,9 +21,9 @@ static void write(infb_conn* c) {
     }
 }
 
-static void process_infb_event(infb_ev_watcher* w, int flags, infb_conn* c) {
+static void process_infb_event(infb_ev_watcher* w, int flags) {
     if (flags & INFB_EV_WRITE)
-	write(c);
+	write(w->conn());
 }
 
 int main(int argc, char* argv[]) {

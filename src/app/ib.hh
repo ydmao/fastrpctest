@@ -38,7 +38,7 @@ inline A round_up(A a, B b) {
 enum { INFB_EV_READ = 0x1, INFB_EV_WRITE = 0x2 };
 
 struct infb_ev_watcher {
-    typedef void (*cb_type)(infb_ev_watcher* w, int revents, infb_conn* c);
+    typedef void (*cb_type)(infb_ev_watcher* w, int revents);
 
     infb_ev_watcher(infb_conn* c) : flags_(0), c_(c) {}
     virtual ~infb_ev_watcher() {}
@@ -50,7 +50,7 @@ struct infb_ev_watcher {
     bool operator()(int flags) {
 	int interest = flags & flags_;
 	if (cb_ && interest)
-	    cb_(this, interest, c_);
+	    cb_(this, interest);
 	return interest;
     }
     void set(cb_type cb) {

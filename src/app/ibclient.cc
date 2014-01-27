@@ -29,12 +29,12 @@ static void write(infb_conn*c ) {
     assert(c->write(b, sizeof(b)) == sizeof(b));
 }
 
-static void process_infb_event(infb_ev_watcher* w, int flags, infb_conn* c) {
+static void process_infb_event(infb_ev_watcher* w, int flags) {
     if (flags & INFB_EV_READ) {
-	read(c);
+	read(w->conn());
 	w->set(INFB_EV_WRITE);
     } else if (flags & INFB_EV_WRITE) {
-	write(c);
+	write(w->conn());
 	w->set(INFB_EV_READ);
     }
 }
