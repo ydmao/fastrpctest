@@ -255,7 +255,7 @@ struct infb_conn {
     }
     ssize_t read(char* buf, size_t len) {
 	if (pending_read_.empty())
-	    real_read(blocking_);
+	    real_read();
 	if (pending_read_.empty()) {
 	    errno = EWOULDBLOCK;
 	    return -1;
@@ -278,7 +278,7 @@ struct infb_conn {
 
     ssize_t write(const char* buf, size_t len) {
 	if (nw_ == tx_depth_)
-	    real_write(blocking_);
+	    real_write();
 
 	if (wbuf_.length() == 0) {
 	    errno = EWOULDBLOCK;
@@ -385,13 +385,13 @@ struct infb_conn {
     }
 
     template <typename F>
-    int poll(bool blocking, ibv_cq* cq, F f) {
+    int poll(ibv_cq* cq, F f) {
 	int depth = (cq == scq_) ? tx_depth_ : rx_depth_;
 	ibv_wc wc[depth];
 	int ne;
 	do {
 	    CHECK((ne = ibv_poll_cq(cq, depth, wc)) >= 0);
-	} while (blocking && ne < 1);
+	} while (blocking_ && ne < 1);
 	for (int i = 0; i < ne; ++i) {
 	    if (wc[i].status != IBV_WC_SUCCESS) {
 		fprintf(stderr, "poll failed with status: %d\n", wc[i].status);
@@ -402,24 +402,24 @@ struct infb_conn {
 	return 0;
     }
 
-    int real_read(bool blocking) {
-	if (blocking)
+    int real_read() {
+	if (blocking_)
 	    wait_channel(rchan_, rcq_, rx_depth_);
 	auto f = [&](const ibv_wc& wc) {
 	   	assert(recv_request(wc.wr_id));
 		pending_read_.push(refcomp::str((const char*)wc.wr_id, wc.byte_len));
 	    };
-	return poll(blocking, rcq_, f);
+	return poll(rcq_, f);
     }
-    int real_write(bool blocking) {
-	if (blocking)
+    int real_write() {
+	if (blocking_)
 	    wait_channel(schan_, scq_, tx_depth_);
 	auto f = [&](const ibv_wc& wc) {
 	        if (non_inline_send_request(wc.wr_id))
 	            wbuf_extend(uintptr_t(wc.wr_id));
 		--nw_;
 	    };
-	return poll(blocking, scq_, f);
+	return poll(scq_, f);
     }
 
     char* wbuf_start() {
