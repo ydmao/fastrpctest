@@ -54,15 +54,15 @@ int main(int argc, char* argv[]) {
             infb_loop* loop = infb_loop::make(infb_provider::default_instance());
 	    infb_conn* c = s.accept(loop);
 	    std::thread t([=]{
-                infb_ev_watcher* w = loop->ev_watcher(c);
-	        client* clt = new client;
-	        using std::placeholders::_1;
-	        using std::placeholders::_2;
-                w->set(std::bind(&client::event_handler, clt, _1, _2));
-                w->set(INFB_EV_READ);
-                while (true)
-	            loop->loop_once();
-	    });
+                    infb_ev_watcher* w = loop->ev_watcher(c);
+	            client* clt = new client;
+	            using std::placeholders::_1;
+	            using std::placeholders::_2;
+                    w->set(std::bind(&client::event_handler, clt, _1, _2));
+                    w->set(INFB_EV_READ);
+                    while (true)
+	                loop->loop_once();
+	        });
 	    t.detach();
 	}
     } else {
