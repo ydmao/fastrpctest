@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <sys/time.h>
 #include <queue>
+#include <thread>
 
 #include "rpc_common/sock_helper.hh"
 #include "compiler/str.hh"
@@ -121,7 +122,7 @@ struct infb_provider {
 	CHECK(d);
 	ibv_context* c = ibv_open_device(d);
 	CHECK(c);
-	return new infb_provider(d, c, ib_port, sl);
+	return new infb_provider(dl, d, c, ib_port, sl);
     }
     static infb_provider* default_instance() {
 	static infb_provider* instance = NULL;
@@ -141,10 +142,31 @@ struct infb_provider {
     int sl() {
 	return sl_;
     }
-  private:
-    infb_provider(ibv_device* d, ibv_context* c, int ib_port, int sl) 
-	: d_(d), c_(c), ib_port_(ib_port), sl_(sl) {
+    ~infb_provider() {
+	stop_ = true;
+	t_->join();
+	delete t_;
+	CHECK(ibv_close_device(c_) == 0);
+	ibv_free_device_list(dl_);
     }
+  private:
+    infb_provider(ibv_device** dl, ibv_device* d, ibv_context* c, int ib_port, int sl) 
+	: dl_(dl), d_(d), c_(c), ib_port_(ib_port), sl_(sl) {
+	stop_ = false;
+	t_ = new std::thread([&]{
+		ibv_async_event e;
+		while (!stop_) {
+		    if (ibv_get_async_event(c_, &e) != 0) {
+			perror("ibv_get_async_event");
+			exit(1);
+		    }
+		    fprintf(stderr, "got event %d\n", e.event_type);
+		}
+	    });
+    }
+    volatile bool stop_;
+    std::thread* t_;
+    ibv_device** dl_;
     ibv_device* d_;
     ibv_context* c_;
     int ib_port_;
