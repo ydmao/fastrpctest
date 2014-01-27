@@ -254,9 +254,9 @@ struct infb_conn {
 	return 0;
     }
     ssize_t read(char* buf, size_t len) {
-	if (pending_read_.empty())
+	if (!readable())
 	    real_read();
-	if (pending_read_.empty()) {
+	if (!readable()) {
 	    errno = EWOULDBLOCK;
 	    return -1;
 	}
@@ -277,10 +277,10 @@ struct infb_conn {
     }
 
     ssize_t write(const char* buf, size_t len) {
-	if (nw_ == tx_depth_)
+	if (!writable())
 	    real_write();
 
-	if (wbuf_.length() == 0) {
+	if (!writable()) {
 	    errno = EWOULDBLOCK;
 	    return -1;
 	}
