@@ -212,8 +212,8 @@ struct infb_conn {
 	static const int max_inline_data = 400;
 	// get port attributes
 	CHECK(ibv_query_port(p_->context(), p_->ib_port(), &portattr_) == 0);
-	//mtu_ = portattr_.active_mtu;
-	mtu_ = IBV_MTU_4096;
+	mtu_ = portattr_.active_mtu;
+	//mtu_ = IBV_MTU_4096;
 	mtub_ = 128 << mtu_;
         tx_depth_ = 1;
 	rx_depth_ = 9;
