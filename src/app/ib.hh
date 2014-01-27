@@ -233,8 +233,12 @@ struct infb_conn {
 	//mtu_ = IBV_MTU_2048;
 	mtub_ = 128 << mtu_;
 	// XXX: decide mr size dynamically
-	rcq_ = create_cq(rchan_, 4);
-	scq_ = create_cq(schan_, 3);
+	rcq_ = create_cq(rchan_, 600);
+	scq_ = create_cq(schan_, 40);
+	if (geteuid() != 0) {
+	    fprintf(stderr, "Infiniband requires root priviledge for performance\n");
+	    exit(-1);
+	}
 	printf("max mr size is %ld\n", p_->attr().max_mr_size);
 	printf("actual rx_depth %d, tx_depth %d\n", rcq_->cqe, scq_->cqe);
 
