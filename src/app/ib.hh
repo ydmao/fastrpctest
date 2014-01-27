@@ -142,6 +142,9 @@ struct infb_provider {
     int sl() {
 	return sl_;
     }
+    const ibv_device_attr& attr() const {
+	return attr_;
+    }
     ~infb_provider() {
 	stop_ = true;
 	t_->join();
@@ -163,6 +166,7 @@ struct infb_provider {
 		    fprintf(stderr, "got event %d\n", e.event_type);
 		}
 	    });
+	CHECK(ibv_query_device(c_, &attr_) == 0);
     }
     volatile bool stop_;
     std::thread* t_;
@@ -171,6 +175,7 @@ struct infb_provider {
     ibv_context* c_;
     int ib_port_;
     int sl_;
+    ibv_device_attr attr_;
 };
 
 // blocking poll socket
@@ -215,8 +220,10 @@ struct infb_conn {
 	mtu_ = portattr_.active_mtu;
 	//mtu_ = IBV_MTU_2048;
 	mtub_ = 128 << mtu_;
+	// XXX: decide mr size dynamically
 	rcq_ = create_cq(rchan_, 4);
 	scq_ = create_cq(schan_, 3);
+	printf("max mr size is %ld\n", p_->attr().max_mr_size);
 	printf("actual rx_depth %d, tx_depth %d\n", rcq_->cqe, scq_->cqe);
 
 	CHECK(pd_ = ibv_alloc_pd(p_->context()));
