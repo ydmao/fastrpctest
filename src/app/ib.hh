@@ -385,8 +385,7 @@ struct infb_conn {
     }
 
     template <typename F>
-    int poll(ibv_cq* cq, F f) {
-	int depth = (cq == scq_) ? tx_depth_ : rx_depth_;
+    int poll(ibv_cq* cq, int depth, F f) {
 	ibv_wc wc[depth];
 	int ne;
 	do {
@@ -409,7 +408,7 @@ struct infb_conn {
 	   	assert(recv_request(wc.wr_id));
 		pending_read_.push(refcomp::str((const char*)wc.wr_id, wc.byte_len));
 	    };
-	return poll(rcq_, f);
+	return poll(rcq_, rx_depth_, f);
     }
     int real_write() {
 	if (blocking_)
@@ -419,7 +418,7 @@ struct infb_conn {
 	            wbuf_extend(uintptr_t(wc.wr_id));
 		--nw_;
 	    };
-	return poll(scq_, f);
+	return poll(scq_, tx_depth_, f);
     }
 
     char* wbuf_start() {
