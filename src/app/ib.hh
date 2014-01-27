@@ -197,15 +197,14 @@ struct infb_conn {
 	      ibv_comp_channel* rchan) : infb_conn(blocking, p, schan, rchan, this) {
     }
 
-    ibv_cq* create_cq(ibv_comp_channel* channel, int depth) {
+    ibv_cq* create_cq(ibv_comp_channel* chan, int depth) {
 	ibv_cq* cq = NULL;
-	CHECK(cq = ibv_create_cq(p_->context(), depth, cqctx_, channel, 0));
-        if (channel) {
-            // when a completion queue entry (CQE) is placed on the CQ,
-            // send a completion event to schan_/rchan_ if the channel is empty.
-            // mimics the level-trigger file descriptors
+	CHECK(cq = ibv_create_cq(p_->context(), depth, cqctx_, chan, 0));
+        // when a completion queue entry (CQE) is placed on the CQ,
+        // send a completion event to schan_/rchan_ if the channel is empty.
+        // mimics the level-trigger file descriptors
+        if (chan)
 	    CHECK(ibv_req_notify_cq(cq, 0) == 0);
-	}
 	return cq;
     }
 
