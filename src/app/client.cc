@@ -4,6 +4,7 @@
 #include "rpc/sync_tcpconn.hh"
 #include "rpc_common/util.hh"
 #include "rpc/sync_rpc.hh"
+#include "rpc/tcp.hh"
 #include <thread>
 #include <string.h>
 
@@ -35,7 +36,7 @@ struct check_echo {
 };
 
 void test_nop() {
-    bench::rpcc c(host_, 8950, 1000);
+    bench::rpcc<tcp_transport> c(host_, 8950, 1000);
     stop_ = false;
     enum {duration = 5};
     alarm(duration);
@@ -49,7 +50,7 @@ void test_nop() {
 }
 
 void test_async_rtt() {
-    bench::rpcc c(host_, 8950, 1);
+    bench::rpcc<tcp_transport> c(host_, 8950, 1);
     stop_ = false;
     enum {duration = 5};
     alarm(duration);

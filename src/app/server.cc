@@ -4,6 +4,7 @@
 #include "rpc/rpc_server.hh"
 #include "rpcc.hh"
 #include "common/cpu.hh"
+#include "rpc/tcp.hh"
 #include <iostream>
 #include <signal.h>
 #include <boost/program_options.hpp>
@@ -17,26 +18,27 @@ void handle_term(int) {
     terminated_ = true;
 }
 
-struct server : public TestServiceInterface<true> {
+template <typename T>
+struct server : public TestServiceInterface<T, true> {
     server() {
     }
 #if 0
-    void nop(rpc::grequest<ProcNumber::nop, false>* q, uint64_t) {
+    void nop(rpc::grequest<ProcNumber::nop, false, T>* q, uint64_t) {
         q->execute(OK);
     }
-    void echo(rpc::grequest<ProcNumber::echo, false>* q, uint64_t) {
+    void echo(rpc::grequest<ProcNumber::echo, false, T>* q, uint64_t) {
         q->reply_.set_message(q->req_.message());
         q->execute(OK);
     }
 #endif
-    void nop(rpc::grequest<ProcNumber::nop, true>& q, uint64_t) {
+    void nop(rpc::grequest<ProcNumber::nop, true, T>& q, uint64_t) {
         q.execute(OK);
     }
-    void echo(rpc::grequest<ProcNumber::echo, true>& q, uint64_t) {
+    void echo(rpc::grequest<ProcNumber::echo, true, T>& q, uint64_t) {
         q.reply_.set_message(q.req_.message());
         q.execute(OK);
     }
-    void client_failure(rpc::async_rpcc*) {
+    void client_failure(rpc::async_rpcc<T>*) {
         // usually nop
     }
 };
@@ -58,8 +60,8 @@ int main(int argc, char* argv[]) {
         return -1;
     }
     mandatory_assert(signal(SIGTERM, bench::handle_term) == 0);
-    rpc::async_rpc_server rpcs(port, "0.0.0.0");
-    bench::server s;
+    rpc::async_rpc_server<rpc::tcp_transport> rpcs(port, "0.0.0.0");
+    bench::server<rpc::tcp_transport> s;
     rpcs.register_service(&s);
     std::cout << argv[0] << " listening at port " << port << "\n";
     auto loop = rpc::nn_loop::get_tls_loop();
