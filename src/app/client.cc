@@ -62,7 +62,7 @@ void test_async_rtt() {
 }
 
 void test_sync_client() {
-    bench::TestServiceClient<rpc::sync_tcpconn> client;
+    bench::TestServiceClient<rpc::buffered_tcpconn_client> client;
     // connect to localhost:8950, using localhost and any port
     client.init(host_, 8950, "0.0.0.0", 0);
     bench::EchoRequest req;
@@ -76,7 +76,7 @@ void test_sync_client() {
 }
 
 void test_sync_rtt() {
-    bench::TestServiceClient<rpc::sync_tcpconn> client;
+    bench::TestServiceClient<rpc::buffered_tcpconn_client> client;
     // connect to localhost:8950, using localhost and any port
     client.init(host_, 8950, "0.0.0.0", 0);
     bench::EchoRequest req;
@@ -99,7 +99,7 @@ void test_sync_rtt() {
 }
 
 void test_sync_threaded_rtt() {
-    rpc::sync_tcpconn c;
+    rpc::buffered_tcpconn_client c;
     c.init(host_, 8950, "0.0.0.0", 0);
     assert(c.connect());
     double sum = 0;
@@ -107,7 +107,7 @@ void test_sync_threaded_rtt() {
     std::thread th([&]{ 
 	    rpc::rpc_header h;
 	    bench::EchoReply r;
-	    while (rpc::read_reply(c.in(), r, h)) {
+	    while (c.read_reply(h, r)) {
 		++n;
 	        double t = 0;
 		memcpy(&t, r.message().data(), sizeof(double));
@@ -121,9 +121,7 @@ void test_sync_threaded_rtt() {
     for (; rpc::common::now() - t0 < 5; ) {
 	double t = rpc::common::now();
 	req.mutable_message()->assign((char*)&t, sizeof(t));
-	rpc::send_request(c.out(), ProcNumber::echo,
-			  n, 0, req);
-	c.out()->flush();
+	c.send_request(ProcNumber::echo, n, req, true);
 	usleep(1);
     }
     c.shutdown();
