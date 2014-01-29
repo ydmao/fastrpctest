@@ -62,8 +62,10 @@ void test_async_rtt() {
     c.drain();
 }
 
+typedef rpc::sync_client<rpc::buffered_sync_transport<rpc::nop_lock> > transport;
+
 void test_sync_client() {
-    bench::TestServiceClient<rpc::buffered_tcpconn_client> client;
+    bench::TestServiceClient<transport> client;
     // connect to localhost:8950, using localhost and any port
     client.init(host_, 8950, "0.0.0.0", 0);
     bench::EchoRequest req;
@@ -77,7 +79,7 @@ void test_sync_client() {
 }
 
 void test_sync_rtt() {
-    bench::TestServiceClient<rpc::buffered_tcpconn_client> client;
+    bench::TestServiceClient<transport> client;
     // connect to localhost:8950, using localhost and any port
     client.init(host_, 8950, "0.0.0.0", 0);
     bench::EchoRequest req;
@@ -100,7 +102,7 @@ void test_sync_rtt() {
 }
 
 void test_sync_threaded_rtt() {
-    rpc::buffered_tcpconn_client c;
+    transport c;
     c.init(host_, 8950, "0.0.0.0", 0);
     assert(c.connect());
     double sum = 0;
