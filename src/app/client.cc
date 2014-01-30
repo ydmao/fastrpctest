@@ -63,7 +63,7 @@ void test_async_rtt() {
 }
 
 typedef tcp_transport::sync_transport base_transport;
-typedef rpc::buffered_sync_transport<rpc::nop_lock, base_transport> buffered_transport;
+typedef rpc::buffered_sync_transport<base_transport> buffered_transport;
 typedef rpc::sync_rpc_transport<buffered_transport> rpc_transport;
 
 void test_sync_client() {
