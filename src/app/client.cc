@@ -134,6 +134,20 @@ void test_sync_threaded_rtt() {
     printf("test_sync_threaded_rtt: %.1f us/rpc\n", sum*1000000/n);
 }
 
+void test_message() {
+    bench::EchoRequest req;
+    req.set_message("hello world");
+    char buf[4096];
+    assert(req.SerializeToArray((uint8_t*)buf, sizeof(buf)));
+
+    req.Clear();
+    assert(req.ParseFromArray((uint8_t*)buf, sizeof(buf)));
+
+    bench::nb_EchoRequest nbreq;
+    assert(req.ParseFromArray((uint8_t*)buf, sizeof(buf)));
+    printf("test_message: OK\n");
+}
+
 int main(int argc, char* argv[]) {
     int index = 0;
     if (argc > 1)
@@ -142,6 +156,7 @@ int main(int argc, char* argv[]) {
 	host_ = argv[2];
     pin(ncore() - index - 1);
     signal(SIGALRM, handle_alarm);
+    test_message();
     test_async_rtt();
     test_sync_threaded_rtt();
     test_sync_client();
