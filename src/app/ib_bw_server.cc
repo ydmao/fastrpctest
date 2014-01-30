@@ -14,7 +14,6 @@ struct client {
         ssize_t r = c_->read(b, sizeof(b));
 	if (r < 0) {
 	    perror("client::read");
-	    c_->eselect(0);
 	    return;
 	}
 	if (r != sizeof(b)) {
@@ -26,7 +25,7 @@ struct client {
         sprintf(eb, "c_%d", nr_++);
         assert(strcmp(eb, b) == 0);
     }
-    void event_handler(infb_conn* c, int flags) {
+    void event_handler(infb_async_conn*, int flags) {
         if (flags & ev::READ)
 	    read();
     }
@@ -53,10 +52,11 @@ int main(int argc, char* argv[]) {
 		    rpc::nn_loop* loop = rpc::nn_loop::get_tls_loop();
 	            using std::placeholders::_1;
 	            using std::placeholders::_2;
-		    c->register_loop(loop->ev_loop(), std::bind(&client::event_handler, clt, _1, _2), ev::READ);
+		    infb_async_conn* ac = static_cast<infb_async_conn*>(c);
+		    ac->register_loop(loop->ev_loop(), std::bind(&client::event_handler, clt, _1, _2), ev::READ);
 		    loop->enter();
                     while (true) {
-			c->drain();
+			ac->drain();
 	                loop->run_once();
 		    }
 		    loop->leave();

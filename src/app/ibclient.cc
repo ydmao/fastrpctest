@@ -33,7 +33,7 @@ static void write(infb_conn*c ) {
     assert(c->write(b, sizeof(b)) == sizeof(b));
 }
 
-static void process_infb_event(infb_conn* c, int flags) {
+static void process_infb_event(infb_async_conn* c, int flags) {
     if (flags & ev::READ) {
 	read(c);
 	c->eselect(ev::WRITE);
@@ -58,11 +58,12 @@ int main(int argc, char* argv[]) {
 	rpc::nn_loop* loop = rpc::nn_loop::get_tls_loop();
 	using std::placeholders::_1;
 	using std::placeholders::_2;
-	c->register_loop(loop->ev_loop(), process_infb_event, ev::READ);
+	infb_async_conn* ac = static_cast<infb_async_conn*>(c);
+	ac->register_loop(loop->ev_loop(), process_infb_event, ev::READ);
         write(c);
 	loop->enter();
         while (true) {
-	    c->drain();
+	    ac->drain();
 	    loop->run_once();
 	}
 	loop->leave();
