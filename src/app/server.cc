@@ -23,18 +23,18 @@ struct server : public TestServiceInterface<T, true> {
     server() {
     }
 #if 0
-    void nop(rpc::grequest<ProcNumber::nop, false, T>* q, uint64_t) {
+    void nop(rpc::grequest<ProcNumber::nop, false>* q, uint64_t) {
         q->execute(OK);
     }
-    void echo(rpc::grequest<ProcNumber::echo, false, T>* q, uint64_t) {
+    void echo(rpc::grequest<ProcNumber::echo, false>* q, uint64_t) {
         q->reply_.set_message(q->req_.message());
         q->execute(OK);
     }
 #endif
-    void nop(rpc::grequest<ProcNumber::nop, true, T>& q, uint64_t) {
+    void nop(rpc::grequest<ProcNumber::nop, true>& q, uint64_t) {
         q.execute(OK);
     }
-    void echo(rpc::grequest<ProcNumber::echo, true, T>& q, uint64_t) {
+    void echo(rpc::grequest<ProcNumber::echo, true>& q, uint64_t) {
         q.reply_.set_message(q.req_.message());
         q.execute(OK);
     }
