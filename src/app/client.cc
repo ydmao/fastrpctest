@@ -5,6 +5,7 @@
 #include "rpc_common/util.hh"
 #include "rpc/sync_rpc.hh"
 #include "rpc/tcp.hh"
+#include "rpc/ib.hh"
 #include <thread>
 #include <string.h>
 
@@ -50,7 +51,7 @@ void test_nop() {
 }
 
 void test_async_rtt() {
-    bench::rpcc<tcp_transport> c(host_, 8950, 1);
+    bench::rpcc<ib_transport> c(host_, 8950, 1);
     stop_ = false;
     enum {duration = 5};
     alarm(duration);

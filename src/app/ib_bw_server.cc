@@ -1,6 +1,8 @@
-#include "ib.hh"
+#include "rpc/ib.hh"
 #include <string>
 #include "rpc/libev_loop.hh"
+
+using namespace rpc;
 
 struct client {
     static constexpr size_t size = 4096;

@@ -5,7 +5,7 @@ SRCDIR = ./src
 CXXFLAGS = -fPIC -Wno-pmf-conversions -g -std=gnu++0x -I./src \
            -I. -fno-omit-frame-pointer -O2 -I./fastrpc/src
 
-LIBS = -lboost_program_options -lev -lprotobuf -ldl -lpthread
+LIBS = -lboost_program_options -lev -lprotobuf -ldl -lpthread -libverbs
 
 FASTRPC = ./fastrpc/obj/libfastrpc.so
 

@@ -1,6 +1,8 @@
-#include "ib.hh"
+#include "rpc/ib.hh"
 #include "rpc_common/util.hh"
 #include "rpc/libev_loop.hh"
+
+using namespace rpc;
 
 const size_t size = 4096;
 static char b[size];
@@ -37,7 +39,7 @@ int main(int argc, char* argv[]) {
     if (argc > 1)
 	type = make_infb_type(argv[1]);
 
-    infb_conn* c = infb_client::connect("192.168.100.11", 8181, type);
+    infb_conn* c = infb_connect("192.168.100.11", 8181, type);
     if (type != INFB_CONN_ASYNC) {
 	while (true)
 	    write(c);
