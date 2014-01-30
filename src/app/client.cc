@@ -12,6 +12,8 @@
 using namespace bench;
 using namespace rpc;
 
+#define netstack rpc::ibnet
+
 const char* host_ = "localhost";
 
 int n_ = 0;
@@ -37,7 +39,7 @@ struct check_echo {
 };
 
 void test_nop() {
-    bench::rpcc<tcp_transport> c(host_, 8950, 1000);
+    bench::rpcc<netstack> c(host_, 8950, 1000);
     stop_ = false;
     enum {duration = 5};
     alarm(duration);
@@ -51,7 +53,7 @@ void test_nop() {
 }
 
 void test_async_rtt() {
-    bench::rpcc<ib_transport> c(host_, 8950, 1);
+    bench::rpcc<netstack> c(host_, 8950, 1);
     stop_ = false;
     enum {duration = 5};
     alarm(duration);
@@ -63,7 +65,7 @@ void test_async_rtt() {
     c.drain();
 }
 
-typedef tcp_transport::sync_transport base_transport;
+typedef netstack::sync_transport base_transport;
 typedef rpc::buffered_sync_transport<base_transport> buffered_transport;
 typedef rpc::sync_rpc_transport<buffered_transport> rpc_transport;
 

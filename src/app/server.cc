@@ -5,11 +5,14 @@
 #include "rpcc.hh"
 #include "common/cpu.hh"
 #include "rpc/tcp.hh"
+#include "rpc/ib.hh"
 #include <iostream>
 #include <signal.h>
 #include <boost/program_options.hpp>
 
 namespace bpo = boost::program_options;
+
+#define netstack rpc::ibnet
 
 namespace bench {
 
@@ -60,8 +63,8 @@ int main(int argc, char* argv[]) {
         return -1;
     }
     mandatory_assert(signal(SIGTERM, bench::handle_term) == 0);
-    rpc::async_rpc_server<rpc::tcp_transport> rpcs(port, "0.0.0.0");
-    bench::server<rpc::tcp_transport> s;
+    rpc::async_rpc_server<netstack> rpcs(port, "0.0.0.0");
+    bench::server<netstack> s;
     rpcs.register_service(&s);
     std::cout << argv[0] << " listening at port " << port << "\n";
     auto loop = rpc::nn_loop::get_tls_loop();

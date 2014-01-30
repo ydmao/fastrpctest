@@ -48,12 +48,10 @@ int main(int argc, char* argv[]) {
 	using std::placeholders::_1;
 	using std::placeholders::_2;
 	infb_async_conn* ac = static_cast<infb_async_conn*>(c);
-	ac->register_loop(loop->ev_loop(), process_infb_event, ev::WRITE);
+	ac->register_callback(process_infb_event, ev::WRITE);
 	loop->enter();
-        while (true) {
-	    ac->drain();
+        while (true)
 	    loop->run_once();
-	}
 	loop->leave();
     }
     return 0;

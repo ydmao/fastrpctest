@@ -54,7 +54,7 @@ int main(int argc, char* argv[]) {
 	            using std::placeholders::_1;
 	            using std::placeholders::_2;
 		    infb_async_conn* ac = static_cast<infb_async_conn*>(c);
-		    ac->register_loop(loop->ev_loop(), std::bind(&client::event_handler, clt, _1, _2), ev::READ);
+		    ac->register_callback(std::bind(&client::event_handler, clt, _1, _2), ev::READ);
 		    loop->enter();
                     while (true) {
 			ac->drain();
