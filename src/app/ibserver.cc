@@ -58,9 +58,12 @@ int main(int argc, char* argv[]) {
         client* clt = new client(c);
         if (type != INFB_CONN_ASYNC) {
 	    while (true) {
-	        clt->read(c);
-	        clt->write(c);
+	        if (!clt->read(c))
+		    break;
+	        if (!clt->write(c))
+		    break;
 	    }
+	    delete clt;
 	} else {
 	    std::thread t([=]{
 		    rpc::nn_loop* loop = rpc::nn_loop::get_tls_loop();
