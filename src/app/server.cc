@@ -13,6 +13,7 @@
 namespace bpo = boost::program_options;
 
 #define netstack rpc::ibnet
+//#define netstack rpc::tcpnet
 
 namespace bench {
 
