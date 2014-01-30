@@ -11,22 +11,35 @@ struct client {
     int nw_;
     client(infb_conn* c) : nr_(0), nw_(0), c_(c) {
     }
-    void read(infb_conn* c) {
-        c->read(b, sizeof(b));
+    ~client() {
+	delete c_;
+    }
+   bool read(infb_conn* c) {
+        if (c->read(b, sizeof(b)) != sizeof(b))
+	    return false;
         char eb[size];
         sprintf(eb, "c_%d", nr_++);
         assert(strcmp(eb, b) == 0);
+	return true;
     }
-    void write(infb_conn* c) {
+    bool write(infb_conn* c) {
         sprintf(b, "s_%d", nw_++);
-        c->write(b, sizeof(b));
+        if (c->write(b, sizeof(b)) != sizeof(b))
+	    return false;
+	return true;
     }
     void event_handler(infb_async_conn* ac, int flags) {
         if (flags & ev::READ) {
-	    read(c_);
+	    if (!read(c_)) {
+		delete this;
+		return;
+	     }
 	    ac->eselect(ev::WRITE);
         } else if (flags & ev::WRITE) {
-   	    write(c_);
+   	    if (!write(c_)) {
+		delete this;
+		return;
+	    }
 	    ac->eselect(ev::READ);
         }
     }
@@ -56,10 +69,8 @@ int main(int argc, char* argv[]) {
 		    infb_async_conn* ac = static_cast<infb_async_conn*>(c);
 		    ac->register_callback(std::bind(&client::event_handler, clt, _1, _2), ev::READ);
 		    loop->enter();
-                    while (true) {
-			ac->drain();
+                    while (true)
 	                loop->run_once();
-		    }
 		    loop->leave();
 	        });
 	    t.detach();
