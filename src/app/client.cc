@@ -73,7 +73,7 @@ typedef rpc::sync_rpc_transport<buffered_transport> rpc_transport;
 void test_sync_client() {
     bench::TestServiceClient<rpc_transport> client;
     // connect to localhost:8950, using localhost and any port
-    client.init(host_, 8950, "0.0.0.0");
+    client.set_address(host_, 8950, "0.0.0.0");
     bench::EchoRequest req;
     req.set_message("hello world");
     assert(client.send_echo(req));
@@ -87,7 +87,7 @@ void test_sync_client() {
 void test_sync_rtt() {
     bench::TestServiceClient<rpc_transport> client;
     // connect to localhost:8950, using localhost and any port
-    client.init(host_, 8950, "0.0.0.0");
+    client.set_address(host_, 8950, "0.0.0.0");
     bench::EchoRequest req;
     bench::EchoReply reply;
     req.set_message("hello world");
@@ -109,7 +109,7 @@ void test_sync_rtt() {
 
 void test_sync_threaded_rtt() {
     rpc_transport c;
-    c.init(host_, 8950, "0.0.0.0");
+    c.set_address(host_, 8950, "0.0.0.0");
     assert(c.connect());
     double sum = 0;
     int n = 0;
