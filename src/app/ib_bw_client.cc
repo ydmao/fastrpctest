@@ -29,9 +29,10 @@ static void write(infb_conn* c) {
     }
 }
 
-static void process_infb_event(infb_async_conn* c, int flags) {
+static bool process_infb_event(infb_async_conn* c, int flags) {
     if (flags & ev::WRITE)
 	write(c);
+    return false;
 }
 
 int main(int argc, char* argv[]) {

@@ -28,20 +28,21 @@ struct client {
 	    return false;
 	return true;
     }
-    void event_handler(infb_async_conn* ac, int flags) {
+    bool event_handler(infb_async_conn* ac, int flags) {
         if (flags & ev::READ) {
 	    if (!read(c_)) {
 		delete this;
-		return;
+		return true;
 	     }
 	    ac->eselect(ev::WRITE);
         } else if (flags & ev::WRITE) {
    	    if (!write(c_)) {
 		delete this;
-		return;
+		return true;
 	    }
 	    ac->eselect(ev::READ);
         }
+	return false;
     }
   private:
     infb_conn* c_;

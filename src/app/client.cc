@@ -66,8 +66,7 @@ void test_async_rtt() {
     c.drain();
 }
 
-typedef netstack::sync_transport base_transport;
-typedef rpc::buffered_sync_transport<base_transport> buffered_transport;
+typedef rpc::buffered_sync_transport<netstack> buffered_transport;
 typedef rpc::sync_rpc_transport<buffered_transport> rpc_transport;
 
 void test_sync_client() {

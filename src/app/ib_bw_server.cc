@@ -25,9 +25,10 @@ struct client {
         sprintf(eb, "c_%d", nr_++);
         assert(strcmp(eb, b) == 0);
     }
-    void event_handler(infb_async_conn*, int flags) {
+    bool event_handler(infb_async_conn*, int flags) {
         if (flags & ev::READ)
 	    read();
+	return false;
     }
   private:
     infb_conn* c_;

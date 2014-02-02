@@ -33,7 +33,7 @@ static void write(infb_conn*c ) {
     assert(c->write(b, sizeof(b)) == sizeof(b));
 }
 
-static void process_infb_event(infb_async_conn* c, int flags) {
+static bool process_infb_event(infb_async_conn* c, int flags) {
     if (flags & ev::READ) {
 	read(c);
 	c->eselect(ev::WRITE);
@@ -41,6 +41,7 @@ static void process_infb_event(infb_async_conn* c, int flags) {
 	write(c);
 	c->eselect(ev::READ);
     }
+    return false;
 }
 
 int main(int argc, char* argv[]) {
