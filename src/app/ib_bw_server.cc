@@ -60,8 +60,8 @@ int main(int argc, char* argv[]) {
         infb_conn* c = s.accept(type);
         client* clt = new client(c);
         if (type != INFB_CONN_ASYNC) {
-	    while (true)
-	        clt->read();
+	    while (clt->read());
+	    delete clt;
         } else  {
 	    std::thread t([=]{
 		    rpc::nn_loop* loop = rpc::nn_loop::get_tls_loop();
