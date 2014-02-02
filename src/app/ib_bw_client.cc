@@ -15,8 +15,8 @@ static void write(infb_conn* c) {
     ssize_t r;
     do {
         sprintf(b, "c_%d", iters++);
-    } while ((r = c->write(b, sizeof(b))) == sizeof(b));
-    if (r > 0) {
+    } while ((r = c->write(b, sizeof(b))) == sizeof(b) && iters <= 400000);
+    if (r > 0 && r != sizeof(b)) {
 	fprintf(stderr, "sent partial message\n");
 	assert(0);
     }
