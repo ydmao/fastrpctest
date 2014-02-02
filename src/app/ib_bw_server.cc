@@ -1,6 +1,7 @@
 #include "rpc/ib.hh"
 #include <string>
 #include "rpc/libev_loop.hh"
+#include "rpc_common/util.hh"
 
 using namespace rpc;
 
@@ -8,26 +9,39 @@ struct client {
     static constexpr size_t size = 4096;
     char b[size];
     int nr_;
-    client(infb_conn* c) : nr_(0), c_(c) {
+    int off_;
+    client(infb_conn* c) : nr_(0), c_(c), off_(0) {
     }
-    void read() {
-        ssize_t r = c_->read(b, sizeof(b));
+    ~client() {
+	delete c_;
+    }
+    bool read() {
+        ssize_t r = c_->read(b + off_, sizeof(b) - off_);
 	if (r < 0) {
 	    perror("client::read");
-	    return;
+	    return false;
 	}
-	if (r != sizeof(b)) {
-	    perror("client::read");
-	    fprintf(stderr, "expected %zd, got %zd\n", sizeof(b), r);
-	    assert(0);
+	off_ += r;
+	if (off_ != sizeof(b))
+	    return true;
+	static double last = 0;
+	if (rpc::common::now() - last > 1) {
+	    fprintf(stderr, "%d\n", nr_);
+	    last = rpc::common::now();
 	}
+	//fprintf(stderr, "reading %d\n", nr_);
         char eb[size];
         sprintf(eb, "c_%d", nr_++);
         assert(strcmp(eb, b) == 0);
+	off_ = 0;
+	return true;
     }
     bool event_handler(infb_async_conn*, int flags) {
         if (flags & ev::READ)
-	    read();
+	    if (!read()) {
+		delete this;
+		return true;
+	    }
 	return false;
     }
   private:
@@ -56,10 +70,9 @@ int main(int argc, char* argv[]) {
 		    infb_async_conn* ac = static_cast<infb_async_conn*>(c);
 		    ac->register_callback(std::bind(&client::event_handler, clt, _1, _2), ev::READ);
 		    loop->enter();
-                    while (true) {
-			ac->drain();
+                    while (loop->has_edge_triggered())
 	                loop->run_once();
-		    }
+		    fprintf(stderr, "exiting\n");
 		    loop->leave();
 	        });
   	    t.detach();
