@@ -151,6 +151,23 @@ void test_message() {
     printf("test_message: OK\n");
 }
 
+void test_large_rpc() {
+    bench::rpcc<netstack> c(host_, 8950, 1);
+    stop_ = false;
+    char buf[8192];
+    memset(buf, 'a', sizeof(buf));
+    buf[sizeof(buf) - 1] = 0;
+
+    enum {duration = 5};
+    alarm(duration);
+    n_ = 0;
+    double t0 = rpc::common::now();
+    while (!stop_)
+        c.echo(buf, check_echo());
+    std::cout << "test_large_rpc: "<< (1000000*(rpc::common::now() - t0)/n_) << " us/rpc\n";
+    c.drain();
+}
+
 int main(int argc, char* argv[]) {
     int index = 0;
     if (argc > 1)
@@ -159,6 +176,7 @@ int main(int argc, char* argv[]) {
 	host_ = argv[2];
     pin(ncore() - index - 1);
     signal(SIGALRM, handle_alarm);
+    test_large_rpc();
     test_message();
     test_async_rtt();
     test_sync_threaded_rtt();
