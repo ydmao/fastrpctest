@@ -8,6 +8,7 @@
 #include "rpc/ib.hh"
 #include <thread>
 #include <string.h>
+#include <sys/prctl.h>
 
 using namespace bench;
 using namespace rpc;
@@ -174,6 +175,7 @@ void test_large_rpc() {
 }
 
 int main(int argc, char* argv[]) {
+    assert(prctl(PR_SET_TIMERSLACK, 1000) == 0);
     int index = 0;
     if (argc > 1)
         index = atoi(argv[1]);
