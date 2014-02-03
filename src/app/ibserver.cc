@@ -73,7 +73,7 @@ int main(int argc, char* argv[]) {
 		    infb_async_conn* ac = static_cast<infb_async_conn*>(c);
 		    ac->register_callback(std::bind(&client::event_handler, clt, _1, _2), ev::READ);
 		    loop->enter();
-                    while (true)
+                    while (loop->has_edge_triggered())
 	                loop->run_once();
 		    loop->leave();
 	        });
