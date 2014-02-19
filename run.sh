@@ -1,5 +1,5 @@
 for i in $(seq 1 16)
 do
-  sudo ./obj/ibclient poll &
+  sudo ./obj/ibclient async &
   #echo $i
 done
