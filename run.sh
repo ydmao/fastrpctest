@@ -1,3 +1,5 @@
-./obj/client 0 &
-./obj/client 1 &
-./obj/client 2
+for i in $(seq 1 16)
+do
+  sudo ./obj/ibclient poll &
+  #echo $i
+done

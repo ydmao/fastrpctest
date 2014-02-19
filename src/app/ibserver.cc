@@ -58,13 +58,16 @@ int main(int argc, char* argv[]) {
         infb_conn* c = s.accept(type);
         client* clt = new client(c);
         if (type != INFB_CONN_ASYNC) {
-	    while (true) {
-	        if (!clt->read(c))
-		    break;
-	        if (!clt->write(c))
-		    break;
-	    }
-	    delete clt;
+	    std::thread t([=]{
+	            while (true) {
+	                if (!clt->read(c))
+		            break;
+  	                if (!clt->write(c))
+		            break;
+	            }
+	            delete clt;
+	        });
+	    t.detach();
 	} else {
 	    std::thread t([=]{
 		    rpc::nn_loop* loop = rpc::nn_loop::get_tls_loop();

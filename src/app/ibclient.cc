@@ -6,17 +6,15 @@ const size_t size = 20;
 static char b[size];
 
 using namespace rpc;
+double t0;
 
 static void read(infb_conn* c) {
-    static double t0;
     static int iters = 0;
     assert(c->read(b, sizeof(b)) == sizeof(b));
     char eb[size];
     sprintf(eb, "s_%d", iters);
     //fprintf(stderr, "expected %s, actual %s\n", eb, b);
     assert(strcmp(eb, b) == 0);
-    if (iters == 0)
-        t0 = rpc::common::now();
     ++iters;
     if (iters == 200000) {
         double t = rpc::common::now() - t0;
@@ -48,8 +46,12 @@ int main(int argc, char* argv[]) {
     infb_conn_type type = INFB_CONN_ASYNC;
     if (argc > 1)
 	type = make_infb_type(argv[1]);
-
+    double t = rpc::common::now();
     infb_conn* c = infb_connect("192.168.100.11", 8181, type);
+    while (rpc::common::now() - t < 3)
+	usleep(100*1000);
+    t0 = rpc::common::now();
+
     if (type != INFB_CONN_ASYNC) {
         while (true) {
             write(c);
