@@ -16,7 +16,9 @@ all: $(FASTRPC) \
      $(OBJDIR)/ibclient \
      $(OBJDIR)/ibserver \
      $(OBJDIR)/ib_bw_server \
-     $(OBJDIR)/ib_bw_client
+     $(OBJDIR)/ib_bw_client \
+     $(OBJDIR)/sync_server \
+     $(OBJDIR)/sync_client
 
 $(FASTRPC): fastrpc-update
 
@@ -27,6 +29,12 @@ fastrpc-update:
 COMMON_OBJS := $(wildcard $(SRCDIR)/common/*.cc)
 COMMON_OBJS := $(subst .cc,.o,$(notdir $(COMMON_OBJS))) 
 COMMON_OBJS := $(addprefix $(OBJDIR)/,$(COMMON_OBJS))
+
+$(OBJDIR)/sync_client: $(OBJDIR)/sync_client.o $(COMMON_OBJS) $(FASTRPC)
+	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) $(LIBS) -o $@
+
+$(OBJDIR)/sync_server: $(OBJDIR)/sync_server.o $(COMMON_OBJS) $(FASTRPC)
+	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) $(LIBS) -o $@
 
 $(OBJDIR)/server: $(OBJDIR)/server.o $(COMMON_OBJS) $(FASTRPC)
 	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) $(LIBS) -o $@

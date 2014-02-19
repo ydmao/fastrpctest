@@ -1,6 +1,7 @@
 #include "rpc/ib.hh"
 #include <string>
 #include "rpc/libev_loop.hh"
+#include <sys/prctl.h>
 
 using namespace rpc;
 
@@ -49,6 +50,7 @@ struct client {
 };
 
 int main(int argc, char* argv[]) {
+    assert(prctl(PR_SET_TIMERSLACK, 1000) == 0);
     infb_conn_type type = INFB_CONN_ASYNC;
     if (argc > 1)
 	type = make_infb_type(argv[1]);
