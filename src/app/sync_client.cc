@@ -36,7 +36,7 @@ struct check_echo {
 void test_async_rtt() {
     bench::rpcc<netstack> c(host_, port_, 1);
     stop_ = false;
-    enum {duration = 5};
+    enum {duration = 10};
     alarm(duration);
     n_ = 0;
     double t0 = rpc::common::now();
