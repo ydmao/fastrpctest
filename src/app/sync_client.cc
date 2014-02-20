@@ -45,6 +45,37 @@ void test_async_rtt() {
     c.drain();
 }
 
+#if 1
+typedef rpc::buffered_sync_transport<netstack> buffered_transport;
+typedef rpc::sync_rpc_transport<buffered_transport> rpc_transport;
+#else
+typedef rpc::direct_sync_transport<netstack> direct_transport;
+typedef rpc::sync_rpc_transport<direct_transport> rpc_transport;
+#endif
+
+void test_sync_rtt() {
+    bench::TestServiceClient<rpc_transport> client;
+    // connect to localhost:8950, using localhost and any port
+    client.set_address(host_, 8950, "0.0.0.0");
+    bench::EchoRequest req;
+    bench::EchoReply reply;
+    req.set_message("hello world");
+
+    // make sure we are connected    
+    assert(client.send_echo(req));
+    assert(client.recv_echo(reply));
+
+    int n = 0;
+    double t0 = rpc::common::now();
+    for (; rpc::common::now() - t0 < 5; ++n) {
+        assert(client.send_echo(req));
+	//reply.Clear();
+        assert(client.recv_echo(reply));
+        assert(reply.message() == req.message());
+    }
+    printf("test_sync_rtt: %.1f us/rpc\n", (rpc::common::now() - t0) * 1000000 / n);
+}
+
 int main(int argc, char* argv[]) {
     //assert(prctl(PR_SET_TIMERSLACK, 1000) == 0);
     if (argc > 1)
