@@ -17,6 +17,7 @@ using namespace rpc;
 //#define netstack rpc::tcpnet
 
 const char* host_ = "localhost";
+int port_ = 8950;
 
 int n_ = 0;
 volatile sig_atomic_t stop_ = false;
@@ -33,7 +34,7 @@ struct check_echo {
 };
 
 void test_async_rtt() {
-    bench::rpcc<netstack> c(host_, 8950, 1);
+    bench::rpcc<netstack> c(host_, port_, 1);
     stop_ = false;
     enum {duration = 5};
     alarm(duration);
@@ -56,7 +57,7 @@ typedef rpc::sync_rpc_transport<direct_transport> rpc_transport;
 void test_sync_rtt() {
     bench::TestServiceClient<rpc_transport> client;
     // connect to localhost:8950, using localhost and any port
-    client.set_address(host_, 8950, "0.0.0.0");
+    client.set_address(host_, port_, "0.0.0.0");
     bench::EchoRequest req;
     bench::EchoReply reply;
     req.set_message("hello world");
@@ -80,6 +81,8 @@ int main(int argc, char* argv[]) {
     //assert(prctl(PR_SET_TIMERSLACK, 1000) == 0);
     if (argc > 1)
 	host_ = argv[1];
+    if (argc > 2)
+	port_ = atoi(argv[2]);
     signal(SIGALRM, handle_alarm);
     test_async_rtt();
     return 0;
