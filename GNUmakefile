@@ -30,29 +30,11 @@ COMMON_OBJS := $(wildcard $(SRCDIR)/common/*.cc)
 COMMON_OBJS := $(subst .cc,.o,$(notdir $(COMMON_OBJS))) 
 COMMON_OBJS := $(addprefix $(OBJDIR)/,$(COMMON_OBJS))
 
-$(OBJDIR)/sync_client: $(OBJDIR)/sync_client.o $(COMMON_OBJS) $(FASTRPC)
-	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) $(LIBS) -o $@
-
-$(OBJDIR)/sync_server: $(OBJDIR)/sync_server.o $(COMMON_OBJS) $(FASTRPC)
-	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) $(LIBS) -o $@
-
-$(OBJDIR)/server: $(OBJDIR)/server.o $(COMMON_OBJS) $(FASTRPC)
-	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) $(LIBS) -o $@
-
-$(OBJDIR)/client: $(OBJDIR)/client.o $(COMMON_OBJS) $(FASTRPC)
-	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) $(LIBS) -o $@
-
-$(OBJDIR)/ibclient: $(OBJDIR)/ibclient.o $(FASTRPC)
+ib%: ib%.o $(FASTRPC)
 	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) -libverbs -lev -o $@
 
-$(OBJDIR)/ibserver: $(OBJDIR)/ibserver.o $(FASTRPC)
-	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) -libverbs -lev -o $@
-
-$(OBJDIR)/ib_bw_client: $(OBJDIR)/ib_bw_client.o $(FASTRPC)
-	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) -libverbs -lev -o $@
-
-$(OBJDIR)/ib_bw_server: $(OBJDIR)/ib_bw_server.o $(FASTRPC)
-	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) -libverbs -lev -o $@
+%: %.o $(COMMON_OBJS) $(FASTRPC)
+	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) $(LIBS) -o $@
 
 $(OBJDIR)/%.o: $(SRCDIR)/common/%.cc
 	mkdir -p $(DEPS) $(OBJDIR)
