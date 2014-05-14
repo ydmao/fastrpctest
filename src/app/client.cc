@@ -13,8 +13,8 @@
 using namespace bench;
 using namespace rpc;
 
-#define netstack rpc::ibnet
-//#define netstack rpc::tcpnet
+//#define netstack rpc::ibnet
+#define netstack rpc::tcpnet
 
 const char* host_ = "localhost";
 
