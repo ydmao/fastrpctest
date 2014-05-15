@@ -7,11 +7,7 @@ CXXFLAGS = -fPIC -Wno-pmf-conversions -g -std=gnu++0x -I./src \
 
 LIBS = -lboost_program_options -lev -lprotobuf -ldl -lpthread -libverbs
 
-FASTRPC = ./fastrpc/obj/libfastrpc.so
-
-# Make sure that FASTRPC is the first target!
-all: $(FASTRPC) \
-     $(OBJDIR)/server \
+all: $(OBJDIR)/server \
      $(OBJDIR)/client \
      $(OBJDIR)/ibclient \
      $(OBJDIR)/ibserver \
@@ -20,21 +16,25 @@ all: $(FASTRPC) \
      $(OBJDIR)/sync_server \
      $(OBJDIR)/sync_client
 
-$(FASTRPC): fastrpc-update
-
-fastrpc-update:
-	if ! test -L ./fastrpc/src/proto; then (ln -s $(PWD)/proto fastrpc/src/proto); fi
-	cd fastrpc && PROTO=bench.proto make
-
 COMMON_OBJS := $(wildcard $(SRCDIR)/common/*.cc)
-COMMON_OBJS := $(subst .cc,.o,$(notdir $(COMMON_OBJS))) 
-COMMON_OBJS := $(addprefix $(OBJDIR)/,$(COMMON_OBJS))
+COMMON_OBJS := $(subst .cc,.o,$(notdir $(OBJS)))
+COMMON_OBJS := $(addprefix $(OBJDIR)/,$(OBJS))
 
-ib%: ib%.o $(FASTRPC)
-	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) -libverbs -lev -o $@
+# Define all objects that depends on fastrpc
+DEPOBJS := $(wildcard $(SRCDIR)/app/*.cc)
+DEPOBJS := $(subst .cc,.o,$(notdir $(DEPOBJS)))
+DEPOBJS := $(addprefix $(OBJDIR)/,$(DEPOBJS)) $(COMMON_OBJS)
+# The name of the Protocol Buffer file in the ./proto directory.
+# Define before the subsequent "include" statement
+PROTOFILE := bench.proto
+# include the definition of FASTRPC and the rule to build FASTRPC
+include fastrpc/Makefile.include
 
-%: %.o $(COMMON_OBJS) $(FASTRPC)
-	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) $(LIBS) -o $@
+ib%: ib%.o
+	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) -libverbs -lev $(FASTRPC) -o $@
+
+%: %.o $(OBJS)
+	g++ $^ -L$(OBJDIR) -Wl,-R $(OBJDIR) $(LIBS) $(FASTRPC) -o $@
 
 $(OBJDIR)/%.o: $(SRCDIR)/common/%.cc
 	mkdir -p $(DEPS) $(OBJDIR)
@@ -43,7 +43,6 @@ $(OBJDIR)/%.o: $(SRCDIR)/common/%.cc
 $(OBJDIR)/%.o: $(SRCDIR)/app/%.cc
 	mkdir -p $(DEPS) $(OBJDIR)
 	g++ $(CXXFLAGS) -c $(DEPCFLAGS) $< -o $@
-
 
 DEPFILES := $(wildcard $(DEPS)/*.d)
 ifneq ($(DEPFILES),)
@@ -54,5 +53,3 @@ endif
 
 clean:
 	rm $(DEPS) $(OBJDIR) -rf
-	cd fastrpc && make clean
-
