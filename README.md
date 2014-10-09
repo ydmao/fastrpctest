@@ -15,8 +15,11 @@ This means our blocking based simple parser is ~2X faster (12.7 million echos/se
 our non-blocking based simple parser is ~5X faster (24.7 million echos/econd).
 
 Usage:
-  $ make
-  $ ./obj/server
-  $ ./run.sh
+<pre>
+  ./bootstrap.sh
+  make
+  ./obj/server
+  ./run.sh
+</pre>
 
 See src/app/client.cc for examples about synchronous and asynchronus rpc clients.
